@@ -1,0 +1,50 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '4.0.2'
+	id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'echobridge.com'
+version = '0.0.1-SNAPSHOT'
+description = 'Demo project for Spring Boot'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+}
+
+configurations {
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
+}
+
+repositories {
+	mavenCentral()
+	maven { url 'https://oss.sonatype.org/content/repositories/snapshots' } // Fallback
+	maven { url 'https://repo1.maven.org/maven2' }
+    maven { url 'https://oss.sonatype.org/content/repositories/releases' }
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'com.typesafe.akka:akka-stream_2.13:2.6.20'
+    implementation 'com.typesafe.akka:akka-stream-typed_2.13:2.6.20'
+	implementation 'com.typesafe.akka:akka-serialization-jackson_2.13:2.6.20'
+	implementation 'org.springframework.boot:spring-boot-starter-restclient'
+	compileOnly 'org.projectlombok:lombok'
+	implementation 'net.java.dev.jna:jna:5.7.0'
+    implementation 'com.alphacephei:vosk:0.3.38'
+	// implementation 'com.alphacephei:vosk:0.3.44' //  vosk speech recognition java friendly library
+	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	annotationProcessor 'org.projectlombok:lombok'
+	 // Test
+    testImplementation 'com.typesafe.akka:akka-stream-testkit_2.13:2.6.20'
+	testImplementation 'org.springframework.boot:spring-boot-starter-restclient-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
