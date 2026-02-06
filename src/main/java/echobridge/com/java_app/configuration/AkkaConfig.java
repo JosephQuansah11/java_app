@@ -11,18 +11,18 @@ import akka.stream.Materializer;
 public class AkkaConfig {
 
     @Bean(destroyMethod = "terminate")
-    public ActorSystem actorSystem() {
+    ActorSystem actorSystem() {
         return ActorSystem.create("JavaAppSystem");
     }
 
     @Bean
-    public Materializer materializer(ActorSystem actorSystem) {
+    Materializer materializer(ActorSystem actorSystem) {
         return Materializer.createMaterializer(actorSystem);
     }
 
     // Add this
     @Bean
-    public RestClient restClient() {
+    RestClient restClient() {
         return RestClient.create();
     }
 }

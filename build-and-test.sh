@@ -35,14 +35,14 @@ if curl -f http://localhost:8080/actuator/health; then
     echo "✅ Health check passed!"
 else
     echo "❌ Health check failed!"
-    docker stop java-app-test
-    docker rm java-app-test
+    docker stop java-echobridge-app-test
+    docker rm java-echobridge-app-test
     exit 1
 fi
 
 # Stop and remove test container
 echo "🧹 Cleaning up test container..."
-docker stop java-app-test
-docker rm java-app-test
+docker stop java-echobridge-app-test
+docker rm java-echobridge-app-test
 
 echo "🎉 Build and test process completed successfully!"

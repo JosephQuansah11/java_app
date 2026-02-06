@@ -4,18 +4,21 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.io.File;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.vosk.Model;
 import org.vosk.Recognizer;
 
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
-@AllArgsConstructor
 public class HttpSpeechRecognitionServiceImpl implements SpeechRecognitionService {
+
+    @Value("${vosk.model.path:src/main/resources/vosk-model-small-en-us-0.15}")
+    private String modelPath;
     
 
     // @Override
@@ -53,7 +56,14 @@ public class HttpSpeechRecognitionServiceImpl implements SpeechRecognitionServic
     public CompletionStage<String> transcribe(short[] audioSamples) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                Model model = new Model("src/main/resources/vosk-model-small-en-us-0.15");
+                // Validate model path exists
+                File modelFile = new File(modelPath);
+                if (!modelFile.exists()) {
+                    log.error("Vosk model not found at path: {}", modelPath);
+                    return "";
+                }
+                
+                Model model = new Model(modelPath);
                 try (Recognizer recognizer = new Recognizer(model, 16000)) {
                     // Convert shorts to bytes
                     byte[] bytes = shortsToBytes(audioSamples);
