@@ -5,6 +5,9 @@ set -e
 
 echo "🚀 Starting build and test process..."
 
+# Ensure gradlew is executable
+chmod +x ./gradlew
+
 # Clean previous builds
 echo "🧹 Cleaning previous builds..."
 ./gradlew clean
