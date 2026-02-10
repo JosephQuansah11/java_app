@@ -28,16 +28,38 @@ repositories {
 }
 
 dependencies {
+	// HTTP clients for APIs
+	implementation 'org.springframework.boot:spring-boot-starter-webflux'
+
+	// JSON processing
+	implementation 'com.fasterxml.jackson.core:jackson-databind'
+	
 	implementation 'org.springframework.boot:spring-boot-starter-web'
+	
+	implementation 'com.typesafe.akka:akka-actor-typed_2.13:2.6.20'
+
     implementation 'com.typesafe.akka:akka-stream_2.13:2.6.20'
     implementation 'com.typesafe.akka:akka-stream-typed_2.13:2.6.20'
+	
 	implementation 'com.typesafe.akka:akka-serialization-jackson_2.13:2.6.20'
+    
+	implementation 'com.typesafe.akka:akka-cluster_2.13:2.6.20'
+    implementation 'com.typesafe.akka:akka-cluster-tools_2.13:2.6.20'
+    
+	// implementation 'com.typesafe.akka:akka-cluster-sharding_2.13:2.6.20'
+	implementation 'com.typesafe.akka:akka-cluster-sharding-typed_2.13:2.6.20'
+	
+	// implementation 'com.typesafe.akka:akka-persistence_2.13:2.6.20'
+	// implementation 'com.typesafe.akka:akka-persistence-typed_2.13:2.6.20'
+    implementation 'com.typesafe.akka:akka-persistence-typed_2.13:2.6.20'	
+
+	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+	implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
 	implementation 'org.springframework.boot:spring-boot-starter-restclient'
-	compileOnly 'org.projectlombok:lombok'
 	implementation 'net.java.dev.jna:jna:5.7.0'
     implementation 'com.alphacephei:vosk:0.3.38'
-	// implementation 'com.alphacephei:vosk:0.3.44' //  vosk speech recognition java friendly library
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
 	 // Test
     testImplementation 'com.typesafe.akka:akka-stream-testkit_2.13:2.6.20'

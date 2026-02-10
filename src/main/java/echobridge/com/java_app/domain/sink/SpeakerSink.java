@@ -18,6 +18,7 @@ import akka.stream.javadsl.Sink;
 import echobridge.com.java_app.domain.data_structure.AudioOutput;
 import lombok.extern.slf4j.Slf4j;
 
+
 @Component
 @Slf4j
 public class SpeakerSink {

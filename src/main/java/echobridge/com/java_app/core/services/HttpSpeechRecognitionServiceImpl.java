@@ -5,6 +5,7 @@ import java.nio.ByteOrder;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.io.File;
+import java.io.IOException;
 
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
@@ -76,7 +77,7 @@ public class HttpSpeechRecognitionServiceImpl implements SpeechRecognitionServic
 
                     return recognizer.getPartialResult();
                 }
-            } catch (Exception e) {
+            } catch (IOException e) {
                 log.error("Vosk error", e);
                 return "";
             }
