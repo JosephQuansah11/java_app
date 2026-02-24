@@ -1,0 +1,73 @@
+services:
+  # Whisper API Service
+  whisper-api:
+    image: openai/whisper-api
+    container_name: whisper-api
+    ports:
+      - "9000:8000"
+    environment:
+      - WHISPER_MODEL=base
+    volumes:
+      - whisper_models:/app/models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # LibreTranslate Service
+  libretranslate:
+    image: libretranslate/libretranslate
+    container_name: libretranslate
+    ports:
+      - "5000:5000"
+    environment:
+      - LT_LANG=es,fr,de,it,pt,ru,zh,ja,ko,ar
+      - LT_DEBUG=true
+    volumes:
+      - libretranslate_data:/app/libretranslate
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/spec"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Coqui TTS Service
+  coqui-tts:
+    image: ghcr.io/coqui-ai/tts:latest
+    container_name: coqui-tts
+    ports:
+      - "5002:5002"
+    command: tts-server --model_name "tts_models/en/ljspeech/tacotron2-DDC" --port 5002 --host 0.0.0.0
+    volumes:
+      - coqui_models:/root/.local/share/tts
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/api/tts"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Piper TTS Service (using alternative image)
+  piper-tts:
+    image: ghcr.io/rhasspy/piper:latest
+    container_name: piper-tts
+    ports:
+      - "5003:5000"
+    command: piper-tts-server --host 0.0.0.0 --port 5000
+    volumes:
+      - piper_voices:/root/.local/share/piper
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  whisper_models:
+  libretranslate_data:
+  coqui_models:
+  piper_voices:

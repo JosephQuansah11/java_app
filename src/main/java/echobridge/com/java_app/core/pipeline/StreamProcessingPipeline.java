@@ -13,7 +13,7 @@ import akka.stream.UniqueKillSwitch;
 import akka.stream.javadsl.Keep;
 import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
-import echobridge.com.java_app.core.services.SpeechRecognitionService;
+import echobridge.com.java_app.core.services.EnhancedSpeechRecognitionService;
 import echobridge.com.java_app.domain.source.MicrophoneSource;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -27,7 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 public class StreamProcessingPipeline {
 
     private final MicrophoneSource microphoneSource;
-    private final SpeechRecognitionService speechRecognitionService;
+    private final EnhancedSpeechRecognitionService speechRecognitionService;
 
     // FIXED: Use KillSwitch instead of Cancellable
     private Optional<UniqueKillSwitch> killSwitch = Optional.empty();
@@ -63,9 +63,9 @@ public class StreamProcessingPipeline {
     private Source<String, NotUsed> createPipeline() {
         return microphoneSource.createSource().buffer(3, OverflowStrategy.dropHead()) // OverflowStrategy.dropHead()
                 .mapAsync(4, samples -> {
-                    log.debug("Sending {} samples to speech recognition: ", samples);
+                    log.debug("Sending {} samples to speech recognition", samples.samples().length);
                     return speechRecognitionService.transcribe(samples.samples()).exceptionally(throwable -> {
-                        log.error("Error transcribing audio: ", throwable);
+                        log.error("Error transcribing audio: {}", throwable.getMessage(), throwable);
                         return "";
                     });
                 }) // Filter out empty results (silence/noise)
@@ -81,7 +81,7 @@ public class StreamProcessingPipeline {
 
 
     private String postProcessTranscription(String text) {
-        // Clean up the transcription
+        // Clean up transcription
         return text.trim()
                 .replaceAll("\\s+", " ") // normalize whitespace
                 .replaceAll("[.,]$", ""); // remove trailing punctuation

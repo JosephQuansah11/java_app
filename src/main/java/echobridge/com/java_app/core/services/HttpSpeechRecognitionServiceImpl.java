@@ -1,14 +1,14 @@
 package echobridge.com.java_app.core.services;
 
+import java.io.File;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.io.File;
-import java.io.IOException;
 
-import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 import org.vosk.Model;
 import org.vosk.Recognizer;
 
@@ -21,38 +21,6 @@ public class HttpSpeechRecognitionServiceImpl implements SpeechRecognitionServic
     @Value("${vosk.model.path:src/main/resources/vosk-model-small-en-us-0.15}")
     private String modelPath;
     
-
-    // @Override
-    // public CompletionStage<String> transcribe(short[] audioSamples) {
-    // return CompletableFuture.supplyAsync(() -> {
-    // // Convert shorts to bytes for transmission
-    // ByteBuffer buffer = ByteBuffer.allocate(audioSamples.length * 2)
-    // .order(ByteOrder.LITTLE_ENDIAN);
-    // buffer.asShortBuffer().put(audioSamples);
-    // String base64Audio = Base64.getEncoder().encodeToString(buffer.array());
-
-    // // Call your speech-to-text API
-    // Map<String, String> request = Map.of(
-    // "audio", base64Audio,
-    // "format", "pcm_s16le",
-    // "sampleRate", "16000"
-    // );
-
-    // try {
-    // return restClient.post()
-    // .uri("http://localhost:8080/api/asr/transcribe")
-    // .contentType(MediaType.APPLICATION_JSON)
-    // .body(request)
-    // .retrieve()
-    // .body(new ParameterizedTypeReference<Map<String, String>>() {})
-    // .getOrDefault("text", "");
-    // } catch (Exception e) {
-    // log.error("ASR API call failed", e);
-    // return "";
-    // }
-    // }, asyncExecutor);
-    // }
-
     @Override
     public CompletionStage<String> transcribe(short[] audioSamples) {
         return CompletableFuture.supplyAsync(() -> {

@@ -1,0 +1,43 @@
+services:
+  # Whisper API Service (using working image)
+  whisper-api:
+    image: onerah/whisper-api
+    container_name: whisper-api
+    ports:
+      - "9000:8000"
+    environment:
+      - WHISPER_MODEL=base
+    restart: unless-stopped
+
+  # LibreTranslate Service
+  libretranslate:
+    image: libretranslate/libretranslate
+    container_name: libretranslate
+    ports:
+      - "5000:5000"
+    environment:
+      - LT_LANG=es,fr,de,it,pt,ru,zh,ja,ko,ar
+      - LT_DEBUG=true
+    restart: unless-stopped
+
+  # Coqui TTS Service (using alternative image)
+  coqui-tts:
+    image: synesthesiam/coqui-stt:latest
+    container_name: coqui-tts
+    ports:
+      - "5002:5002"
+    command: python -m tts.server.server --model_name "tts_models/en/ljspeech/tacotron2-DDC" --port 5002 --host 0.0.0.0
+    restart: unless-stopped
+
+  # Simple HTTP Server for Piper (alternative)
+  piper-tts:
+    image: python:3.9-slim
+    container_name: piper-tts
+    ports:
+      - "5003:5000"
+    command: >
+      bash -c "
+      apt-get update && apt-get install -y curl &&
+      python -m http.server 5000
+      "
+    restart: unless-stopped

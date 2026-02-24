@@ -125,13 +125,15 @@
     <script>
         let isRecording = false;
         const API_BASE = '/api/echo';
+        let transcriptionHistory = [];
+        let translationHistory = [];
 
         // Initialize Lucide icons
         document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
             updateMicrophoneStatus();
-            setInterval(updateMicrophoneStatus, 5000);
-            setInterval(fetchLatestResults, 3000);
+            setInterval(updateMicrophoneStatus, 2000);
+            setInterval(fetchLatestResults, 1500);
         });
 
         async function startMicrophone() {
@@ -146,6 +148,7 @@
                     isRecording = true;
                     updateMicrophoneStatus();
                     showNotification('Microphone started successfully!', 'success');
+                    startRealtimeUpdates();
                 } else {
                     showNotification('Failed to start microphone: ' + result.message, 'error');
                 }
@@ -166,11 +169,28 @@
                     isRecording = false;
                     updateMicrophoneStatus();
                     showNotification('Microphone stopped successfully!', 'info');
+                    stopRealtimeUpdates();
                 } else {
                     showNotification('Failed to stop microphone: ' + result.message, 'error');
                 }
             } catch (error) {
                 showNotification('Error stopping microphone: ' + error.message, 'error');
+            }
+        }
+
+        let realtimeInterval;
+        
+        function startRealtimeUpdates() {
+            realtimeInterval = setInterval(() => {
+                if (isRecording) {
+                    fetchLatestResults();
+                }
+            }, 1000);
+        }
+        
+        function stopRealtimeUpdates() {
+            if (realtimeInterval) {
+                clearInterval(realtimeInterval);
             }
         }
 
@@ -221,15 +241,25 @@
                 return;
             }
             
-            container.innerHTML = transcriptions.slice(-10).reverse().map(t => `
-                <div class="p-3 bg-gray-50 rounded-lg fade-in">
-                    <p class="text-gray-800">${t.text || 'Empty transcription'}</p>
-                    <p class="text-xs text-gray-500 mt-1">
-                        ${t.language ? 'Language: ' + t.language : ''} 
-                        ${t.confidence ? ' | Confidence: ' + Math.round(t.confidence * 100) + '%' : ''}
-                    </p>
-                </div>
-            `).join('');
+            // Only show new transcriptions
+            const newTranscriptions = transcriptions.filter(t => 
+                !transcriptionHistory.some(existing => existing.text === t.text)
+            );
+            
+            if (newTranscriptions.length > 0) {
+                transcriptionHistory = [...transcriptionHistory, ...newTranscriptions].slice(-20);
+                
+                container.innerHTML = transcriptionHistory.slice(-10).reverse().map(t => `
+                    <div class="p-3 bg-gray-50 rounded-lg fade-in border-l-4 border-blue-500">
+                        <p class="text-gray-800 font-medium">${t.text || 'Empty transcription'}</p>
+                        <p class="text-xs text-gray-500 mt-1">
+                            ${t.language ? 'Language: ' + t.language : ''} 
+                            ${t.confidence ? ' | Confidence: ' + Math.round(t.confidence * 100) + '%' : ''}
+                            ${t.timestamp ? ' | ' + new Date(t.timestamp).toLocaleTimeString() : ''}
+                        </p>
+                    </div>
+                `).join('');
+            }
         }
 
         function updateTranslationResults(translations) {
@@ -240,15 +270,28 @@
                 return;
             }
             
-            container.innerHTML = translations.slice(-10).reverse().map(t => `
-                <div class="p-3 bg-blue-50 rounded-lg fade-in">
-                    <p class="text-sm text-gray-600">Original: ${t.originalText}</p>
-                    <p class="text-gray-800 font-medium">${t.translatedText}</p>
-                    <p class="text-xs text-gray-500 mt-1">
-                        ${t.fromLanguage} → ${t.toLanguage}
-                    </p>
-                </div>
-            `).join('');
+            // Only show new translations
+            const newTranslations = translations.filter(t => 
+                !translationHistory.some(existing => 
+                    existing.originalText === t.originalText && 
+                    existing.translatedText === t.translatedText
+                )
+            );
+            
+            if (newTranslations.length > 0) {
+                translationHistory = [...translationHistory, ...newTranslations].slice(-20);
+                
+                container.innerHTML = translationHistory.slice(-10).reverse().map(t => `
+                    <div class="p-3 bg-blue-50 rounded-lg fade-in border-l-4 border-green-500">
+                        <p class="text-sm text-gray-600">Original: ${t.originalText}</p>
+                        <p class="text-gray-800 font-medium text-lg">${t.translatedText}</p>
+                        <p class="text-xs text-gray-500 mt-1">
+                            ${t.fromLanguage} → ${t.toLanguage}
+                            ${t.timestamp ? ' | ' + new Date(t.timestamp).toLocaleTimeString() : ''}
+                        </p>
+                    </div>
+                `).join('');
+            }
         }
 
         async function translateManualText() {
@@ -272,6 +315,16 @@
                     document.getElementById('manualTranslationText').textContent = result.translatedText;
                     document.getElementById('manualTranslationResult').classList.remove('hidden');
                     showNotification('Translation completed!', 'success');
+                    
+                    // Add to translation history
+                    translationHistory.push({
+                        originalText: text,
+                        translatedText: result.translatedText,
+                        fromLanguage: result.fromLanguage,
+                        toLanguage: result.toLanguage,
+                        timestamp: result.timestamp
+                    });
+                    updateTranslationResults(translationHistory);
                 } else {
                     showNotification('Translation failed: ' + (result.error || 'Unknown error'), 'error');
                 }
@@ -283,6 +336,8 @@
         async function clearSession() {
             try {
                 await fetch(`${API_BASE}/session/clear`, { method: 'POST' });
+                transcriptionHistory = [];
+                translationHistory = [];
                 document.getElementById('transcriptionResults').innerHTML = '<p class="text-gray-500 text-center py-8">No transcriptions yet...</p>';
                 document.getElementById('translationResults').innerHTML = '<p class="text-gray-500 text-center py-8">No translations yet...</p>';
                 document.getElementById('manualTranslationResult').classList.add('hidden');

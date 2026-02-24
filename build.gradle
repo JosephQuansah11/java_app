@@ -29,20 +29,23 @@ repositories {
 
 dependencies {
 	// HTTP clients for APIs
-	implementation 'org.springframework.boot:spring-boot-starter-webflux'
+	// implementation 'org.springframework.boot:spring-boot-starter-webflux'
+	implementation 'org.springframework.boot:spring-boot-starter-restclient'
+	// HTTP client for API calls
+   	implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'io.projectreactor.netty:reactor-netty-http:1.1.0'
 
 	// JSON processing
 	implementation 'com.fasterxml.jackson.core:jackson-databind'
 	
-	implementation 'org.springframework.boot:spring-boot-starter-web'
-	
 	implementation 'com.typesafe.akka:akka-actor-typed_2.13:2.6.20'
 
-    implementation 'com.typesafe.akka:akka-stream_2.13:2.6.20'
+	// Akka streams
+	implementation 'com.typesafe.akka:akka-stream_2.13:2.6.20'
     implementation 'com.typesafe.akka:akka-stream-typed_2.13:2.6.20'
-	
 	implementation 'com.typesafe.akka:akka-serialization-jackson_2.13:2.6.20'
-    
+	
+	// Akka cluster
 	implementation 'com.typesafe.akka:akka-cluster_2.13:2.6.20'
     implementation 'com.typesafe.akka:akka-cluster-tools_2.13:2.6.20'
     
@@ -53,15 +56,26 @@ dependencies {
 	// implementation 'com.typesafe.akka:akka-persistence-typed_2.13:2.6.20'
     implementation 'com.typesafe.akka:akka-persistence-typed_2.13:2.6.20'	
 
+	// Websocket and templating
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 	implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
 	implementation 'org.springframework.boot:spring-boot-starter-restclient'
+	
+	// Audio processing
 	implementation 'net.java.dev.jna:jna:5.7.0'
     implementation 'com.alphacephei:vosk:0.3.38'
+
+    
+    // File upload support
+    implementation 'commons-fileupload:commons-fileupload:1.5'
+    implementation 'commons-io:commons-io:2.11.0'
+	
+	// Development
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
-	 // Test
+	
+	// Test
     testImplementation 'com.typesafe.akka:akka-stream-testkit_2.13:2.6.20'
 	testImplementation 'org.springframework.boot:spring-boot-starter-restclient-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

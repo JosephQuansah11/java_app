@@ -1,28 +1,24 @@
 package echobridge.com.java_app.domain.flow;
 
-import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import akka.NotUsed;
-import echobridge.com.java_app.core.services.SpeechRecognitionService;
+import akka.stream.javadsl.Flow;
+import echobridge.com.java_app.core.services.EnhancedSpeechRecognitionService;
+import echobridge.com.java_app.core.services.EnhancedTextToSpeechService;
+import echobridge.com.java_app.core.services.EnhancedTranslationService;
 import echobridge.com.java_app.domain.data_structure.AudioChunk;
 import echobridge.com.java_app.domain.data_structure.AudioOutput;
 import echobridge.com.java_app.domain.data_structure.Transcription;
 import echobridge.com.java_app.domain.data_structure.Translation;
-import echobridge.com.java_app.core.services.TranslationService;
-import echobridge.com.java_app.core.services.TextToSpeechService;
-import akka.stream.javadsl.Flow;
-
-
+import lombok.AllArgsConstructor;
 
 @Component
 @AllArgsConstructor
 public class SpeechProcessingFlow {
-    private final SpeechRecognitionService asr;
-    private final TranslationService translator;
-    private final TextToSpeechService tts;
-    
-
+    private final EnhancedSpeechRecognitionService asr;
+    private final EnhancedTranslationService translator;
+    private final EnhancedTextToSpeechService tts;
 
     // Flow 1: Audio → Text
     public Flow<AudioChunk, Transcription, NotUsed> transcriptionFlow() {
@@ -38,7 +34,6 @@ public class SpeechProcessingFlow {
             .filter(t -> !t.text().isBlank());
     }
 
-
     // NEW: Accepts raw short[] for convenience
     public Flow<short[], Transcription, NotUsed> transcriptionFlowRaw() {
         return Flow.of(short[].class)
@@ -46,22 +41,16 @@ public class SpeechProcessingFlow {
             .via(transcriptionFlow());
     }
     
-
-    
     // Or make the original more flexible
     public Flow<short[], Transcription, NotUsed> transcriptionFlow(int sampleRate) {
         return Flow.of(short[].class)
             .map(samples -> new AudioChunk(samples, sampleRate))
             .via(transcriptionFlow());
     }
-    
-
 
     private String detectLanguage(String text) {
         return "en";
     }
-
-
 
     // Flow 2: Text → Translated Text  
     public Flow<Transcription, Translation, NotUsed> translationFlow(String targetLang) {
@@ -76,8 +65,6 @@ public class SpeechProcessingFlow {
                     ))
             );
     }
-    
-
 
     // Flow 3: Text → Audio
     public Flow<Translation, AudioOutput, NotUsed> textToSpeechFlow() {
@@ -87,8 +74,6 @@ public class SpeechProcessingFlow {
                     .thenApply(pcm -> new AudioOutput(pcm, "pcm_s16le"))
             );
     }
-    
-
 
     // Composite: Chain them together
     public Flow<AudioChunk, AudioOutput, NotUsed> fullPipeline(String targetLang) {

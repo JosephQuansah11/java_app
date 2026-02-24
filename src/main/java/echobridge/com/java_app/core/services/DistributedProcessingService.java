@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import echobridge.com.java_app.domain.data_structure.Translation;
@@ -25,9 +26,9 @@ public class DistributedProcessingService {
     private final TextToSpeechService textToSpeechService;
     
     public DistributedProcessingService(
-            TranslationService translationService,
-            SpeechRecognitionService speechRecognitionService,
-            TextToSpeechService textToSpeechService) {
+            @Qualifier("enhancedTranslationService") TranslationService translationService,
+            @Qualifier("enhancedSpeechRecognitionService") SpeechRecognitionService speechRecognitionService,
+            @Qualifier("enhancedTextToSpeechService") TextToSpeechService textToSpeechService) {
         this.translationService = translationService;
         this.speechRecognitionService = speechRecognitionService;
         this.textToSpeechService = textToSpeechService;
