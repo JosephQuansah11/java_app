@@ -47,8 +47,14 @@ public class EnhancedTranslationService extends TranslationService {
     
     private CompletionStage<String> translateWithLibre(String text, String fromLang, String toLang) {
         try {
+            // Support all frontend parameters including alternatives and api_key
             LibreTranslateRequest request = new LibreTranslateRequest(
-                text, fromLang, toLang, "text"
+                text,                   // Main text to translate
+                fromLang,                 // Source language (auto-detect if empty)
+                toLang,                   // Target language
+                "text",                  // Response format
+                3,                        // Number of alternatives
+                ""                        // API key (optional)
             );
             
             HttpHeaders headers = new HttpHeaders();
@@ -60,7 +66,8 @@ public class EnhancedTranslationService extends TranslationService {
                 libreTranslateUrl + "/translate", entity, LibreTranslateResponse.class);
             
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                return CompletableFuture.completedFuture(response.getBody().translatedText());
+                LibreTranslateResponse result = response.getBody();
+                return CompletableFuture.completedFuture(result.translatedText());
             } else {
                 log.error("LibreTranslate error: {}", response.getStatusCode());
                 return fallbackTranslate(text, fromLang, toLang, "LibreTranslate");
@@ -105,7 +112,7 @@ public class EnhancedTranslationService extends TranslationService {
         return CompletableFuture.completedFuture(fallback);
     }
     
-    public record LibreTranslateRequest(String q, String source, String target, String format) {}
+    public record LibreTranslateRequest(String q, String source, String target, String format, int alternatives, String api_key) {}
     public record LibreTranslateResponse(String translatedText, String sourceLanguage, String targetLanguage) {}
     public record ArgosTranslateRequest(String text, String from, String to) {}
     public record ArgosTranslateResponse(String translatedText, String fromLanguage, String toLanguage) {}

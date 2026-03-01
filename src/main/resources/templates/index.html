@@ -304,25 +304,34 @@
             }
             
             try {
-                const response = await fetch(`${API_BASE}/translate`, {
+                const response = await fetch('http://localhost:5000/translate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text, targetLanguage })
+                    body: JSON.stringify({
+                        q: text,
+                        source: 'auto',
+                        target: targetLanguage,
+                        format: 'text',
+                        alternatives: 3,
+                        api_key: ''
+                    })
                 });
                 
                 const result = await response.json();
+                
+                // Handle LibreTranslate API response format
                 if (result.translatedText) {
                     document.getElementById('manualTranslationText').textContent = result.translatedText;
                     document.getElementById('manualTranslationResult').classList.remove('hidden');
                     showNotification('Translation completed!', 'success');
                     
-                    // Add to translation history
+                    // Add to translation history with full response data
                     translationHistory.push({
                         originalText: text,
                         translatedText: result.translatedText,
-                        fromLanguage: result.fromLanguage,
-                        toLanguage: result.toLanguage,
-                        timestamp: result.timestamp
+                        fromLanguage: result.detected_language || result.fromLanguage || 'auto',
+                        toLanguage: targetLanguage,
+                        timestamp: new Date().toISOString()
                     });
                     updateTranslationResults(translationHistory);
                 } else {

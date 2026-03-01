@@ -1,15 +1,20 @@
 package echobridge.com.java_app.api;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import echobridge.com.java_app.adapters.SpeechProcessingAdapter;
 import echobridge.com.java_app.domain.data_structure.Translation;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @RestController
 @RequestMapping("/api/echo")
@@ -71,20 +76,34 @@ public class EchoBridgeController {
             @RequestBody Map<String, String> request) {
         String text = request.get("text");
         String targetLanguage = request.getOrDefault("targetLanguage", "es");
+        String sourceLanguage = request.getOrDefault("sourceLanguage", "auto");
+        String format = request.getOrDefault("format", "text");
+        Integer alternatives = request.get("alternatives") != null ? 
+            Integer.parseInt(request.get("alternatives")) : 3;
+        String apiKey = request.getOrDefault("api_key", "");
         
         try {
             Translation result = speechProcessingAdapter.translateWithDistribution(text, targetLanguage).get();
+            
+            // Return full response matching frontend expectations
             return ResponseEntity.ok(Map.of(
                 "originalText", text,
                 "translatedText", result.translatedText(),
-                "fromLanguage", result.fromLanguage(),
+                "fromLanguage", result.fromLanguage() != null ? result.fromLanguage() : sourceLanguage,
                 "toLanguage", result.toLanguage(),
-                "timestamp", System.currentTimeMillis()
+                "timestamp", System.currentTimeMillis(),
+                "detected_language", result.fromLanguage() != null ? result.fromLanguage() : sourceLanguage,
+                "alternatives", alternatives,
+                "api_key_used", !apiKey.isEmpty()
             ));
         } catch (Exception e) {
             log.error("Translation failed", e);
             return ResponseEntity.internalServerError().body(Map.of(
-                "error", "Translation failed: " + e.getMessage()
+                "error", "Translation failed: " + e.getMessage(),
+                "originalText", text,
+                "fromLanguage", sourceLanguage,
+                "toLanguage", targetLanguage,
+                "timestamp", System.currentTimeMillis()
             ));
         }
     }
