@@ -1,9 +1,8 @@
 package echobridge.com.java_app.core.services;
 
+import java.net.URLEncoder;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -124,6 +123,25 @@ public class EnhancedTextToSpeechService extends TextToSpeechService {
                     }
                 } catch (Exception e) {
                     log.debug("Piper GET endpoint failed: {}", e.getMessage());
+                }
+                
+                // Final fallback: try our custom Piper server format
+                try {
+                    String customUrl = piperTtsUrl + "/synthesize";
+                    PiperTtsRequest customRequest = new PiperTtsRequest(finalText, language, "medium");
+                    
+                    HttpHeaders customHeaders = new HttpHeaders();
+                    customHeaders.setContentType(MediaType.APPLICATION_JSON);
+                    HttpEntity<PiperTtsRequest> customEntity = new HttpEntity<>(customRequest, customHeaders);
+                    
+                    ResponseEntity<byte[]> customResponse = restTemplate.postForEntity(customUrl, customEntity, byte[].class);
+                    
+                    if (customResponse.getStatusCode().is2xxSuccessful()) {
+                        log.info("Successfully used custom Piper server");
+                        return customResponse.getBody();
+                    }
+                } catch (Exception e) {
+                    log.debug("Custom Piper server failed: {}", e.getMessage());
                 }
                 
                 throw new RuntimeException("All Piper endpoints failed");

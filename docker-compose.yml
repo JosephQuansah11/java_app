@@ -1,67 +1,75 @@
 services:
   # Whisper API Service
   whisper-api:
-    image: openai/whisper-api
+    image: fedirz/faster-whisper-server:latest-cpu  # or :latest-gpu for GPU
     container_name: whisper-api
     ports:
       - "9000:8000"
     environment:
       - WHISPER_MODEL=base
+      - WHISPER_DEVICE=cpu  # or cuda for GPU
     volumes:
-      - whisper_models:/app/models
+      - whisper_models:/root/.cache/whisper
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-
   # LibreTranslate Service
   libretranslate:
-    image: libretranslate/libretranslate
+    image: libretranslate/libretranslate:latest
     container_name: libretranslate
     ports:
       - "5000:5000"
     environment:
-      - LT_LANG=es,fr,de,it,pt,ru,zh,ja,ko,ar
+      - LT_LANG=en,es,fr,de,it,pt,ru,zh,ja,ko,ar,nl
       - LT_DEBUG=true
     volumes:
       - libretranslate_data:/app/libretranslate
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/spec"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/languages"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # Coqui TTS Service
+  # Coqui TTS Service (FIXED IMAGE)
   coqui-tts:
-    image: ghcr.io/coqui-ai/tts:latest
+    image: synesthesiam/coqui-tts:latest
     container_name: coqui-tts
     ports:
       - "5002:5002"
-    command: tts-server --model_name "tts_models/en/ljspeech/tacotron2-DDC" --port 5002 --host 0.0.0.0
+    command: >
+      python -m TTS.server.server 
+      --model_name tts_models/en/ljspeech/tacotron2-DDC 
+      --port 5002 
+      --host 0.0.0.0
     volumes:
       - coqui_models:/root/.local/share/tts
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5002/api/tts"]
+      test: ["CMD", "curl", "-f", "http://localhost:5002/"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # Piper TTS Service (using alternative image)
+  # Piper TTS Service (IMPROVED - Pre-built)
   piper-tts:
-    image: ghcr.io/rhasspy/piper:latest
+    image: rhasspy/wyoming-piper:latest
     container_name: piper-tts
     ports:
-      - "5003:5000"
-    command: piper-tts-server --host 0.0.0.0 --port 5000
+      - "5003:10200"  # Wyoming protocol port
+    environment:
+      - PIPER_VOICE=en_US-lessac-medium
+      - PIPER_LENGTH_SCALE=1.0
+      - PIPER_NOISE_SCALE=0.667
+      - PIPER_NOISE_W=0.8
     volumes:
-      - piper_voices:/root/.local/share/piper
+      - piper_voices:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:10200/"]
       interval: 30s
       timeout: 10s
       retries: 3

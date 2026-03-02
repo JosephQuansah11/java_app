@@ -1,5 +1,6 @@
 package echobridge.com.java_app.api;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import echobridge.com.java_app.adapters.SpeechProcessingAdapter;
+import echobridge.com.java_app.core.services.MicrophoneControlService;
 import echobridge.com.java_app.domain.data_structure.Translation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 public class EchoBridgeController {
     
     private final SpeechProcessingAdapter speechProcessingAdapter;
-    
+    private final MicrophoneControlService microphoneControl;
     private final Map<String, Object> sessionData = new ConcurrentHashMap<>();
     
     @PostMapping("/microphone/start")
@@ -110,9 +112,53 @@ public class EchoBridgeController {
     
     @GetMapping("/results/latest")
     public ResponseEntity<Map<String, Object>> getLatestResults() {
+        // Get real-time transcriptions from microphone service
+        List<String> transcriptions = microphoneControl.getTranscriptionHistory();
+        
         return ResponseEntity.ok(Map.of(
-            "transcriptions", sessionData.getOrDefault("transcriptions", new java.util.ArrayList<>()),
+            "transcriptions", transcriptions,
             "translations", sessionData.getOrDefault("translations", new java.util.ArrayList<>()),
+            "timestamp", System.currentTimeMillis()
+        ));
+    }
+    
+    @GetMapping("/transcriptions/stream")
+    public ResponseEntity<Map<String, Object>> getTranscriptionStream() {
+        // Get comprehensive transcription status
+        Map<String, Object> status = microphoneControl.getTranscriptionStatus();
+        
+        // Convert transcription history to proper objects for frontend
+        @SuppressWarnings("unchecked")
+        List<String> transcriptionTexts = (List<String>) status.get("transcriptions");
+        List<Map<String, Object>> transcriptionObjects = new java.util.ArrayList<>();
+        
+        for (String text : transcriptionTexts) {
+            transcriptionObjects.add(Map.of(
+                "text", text,
+                "language", "en",
+                "confidence", 0.95,
+                "timestamp", System.currentTimeMillis()
+            ));
+        }
+        
+        return ResponseEntity.ok(Map.of(
+            "transcriptions", transcriptionObjects,
+            "currentSentence", status.get("currentSentence"),
+            "active", status.get("active"),
+            "sentenceCount", status.get("sentenceCount"),
+            "lastPartialText", status.get("lastPartialText"),
+            "timestamp", System.currentTimeMillis()
+        ));
+    }
+    
+    @GetMapping("/transcriptions/current")
+    public ResponseEntity<Map<String, Object>> getCurrentTranscription() {
+        // Get only the current sentence being built
+        String currentSentence = microphoneControl.getCurrentSentence();
+        
+        return ResponseEntity.ok(Map.of(
+            "currentSentence", currentSentence,
+            "active", microphoneControl.isMicrophoneActive(),
             "timestamp", System.currentTimeMillis()
         ));
     }

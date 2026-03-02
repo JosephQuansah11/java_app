@@ -223,11 +223,12 @@
 
         async function fetchLatestResults() {
             try {
-                const response = await fetch(`${API_BASE}/results/latest`);
+                // Fetch real-time transcriptions
+                const response = await fetch(`${API_BASE}/transcriptions/stream`);
                 const results = await response.json();
                 
                 updateTranscriptionResults(results.transcriptions || []);
-                updateTranslationResults(results.translations || []);
+                updateTranslationResults(translationHistory);
             } catch (error) {
                 console.error('Error fetching results:', error);
             }
