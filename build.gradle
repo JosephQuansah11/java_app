@@ -4,6 +4,8 @@ plugins {
 	id 'io.spring.dependency-management' version '1.1.7'
 }
 
+import java.util.concurrent.TimeUnit
+
 group = 'echobridge.com'
 version = '0.0.1-SNAPSHOT'
 description = 'Demo project for Spring Boot'
@@ -60,6 +62,9 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 	implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
 	implementation 'org.springframework.boot:spring-boot-starter-restclient'
+	// Add WebSocket messaging support
+	implementation 'org.springframework:spring-messaging'
+	implementation 'org.springframework:spring-websocket'
 	
 	// Audio processing
 	implementation 'net.java.dev.jna:jna:5.7.0'
@@ -83,4 +88,75 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+// Alternative: Simple background starter without port detection
+task startPiperBackground {
+    group = 'application'
+    description = 'Starts Piper TTS server in background (simple version)'
+    
+    doLast {
+        // Cross-platform background process
+        def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+        def pythonCmd = isWindows ? 'python' : 'python3'
+        
+        // Use Java ProcessBuilder instead of exec for background processes
+        def pb = new ProcessBuilder(pythonCmd, 'piper-server/server.py', '5003')
+        pb.directory(project.rootDir)
+        pb.inheritIO()
+        
+        def process = pb.start()
+        project.ext.piperProcess = process
+        
+        sleep(3000) // Wait 3 seconds for startup
+        
+        System.setProperty('PIPER_TTS_URL', 'http://localhost:5003')
+        println "Piper TTS Server started on port 5003 (PID: ${process.pid()})"
+        
+        // Set environment variable or property for Spring Boot
+        System.setProperty('PIPER_TTS_URL', 'http://localhost:5003')
+    }
+}
+
+// Register shutdown hook to kill Piper
+gradle.buildFinished {
+    if (project.hasProperty('piperProcess')) {
+        println "Stopping Piper TTS Server..."
+        project.piperProcess.destroy()
+        project.piperProcess.waitFor(5, TimeUnit.SECONDS)
+        if (project.piperProcess.isAlive()) {
+            project.piperProcess.destroyForcibly()
+        }
+    }
+}
+
+// Make bootRun depend on Piper
+bootRun {
+    dependsOn startPiperBackground
+    
+    // Pass Piper URL to Spring Boot
+    environment 'PIPER_TTS_URL', 'http://localhost:5003'
+    
+    // Or as system property
+    systemProperty 'piper.tts.url', 'http://localhost:5003'
+}
+
+// Combined task
+task runWithPiper {
+    group = 'application'
+    description = 'Runs Spring Boot with Piper TTS server (convenience task)'
+    dependsOn bootRun
+}
+
+// Task to stop Piper manually (if needed)
+task stopPiper {
+    group = 'application'
+    description = 'Stops Piper TTS server'
+    
+    doLast {
+        exec {
+            commandLine 'pkill', '-f', 'piper_tts_server.py'
+            ignoreExitValue true
+        }
+    }
 }

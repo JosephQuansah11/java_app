@@ -10,6 +10,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +22,8 @@ public class EnhancedTextToSpeechService extends TextToSpeechService {
     @Value("${coqui.tts.url:http://localhost:5002}")
     private String coquiTtsUrl;
     
-    @Value("${piper.tts.url:http://localhost:5003}")
+
+    @Value("${piper.tts.url}")
     private String piperTtsUrl;
     
     @Value("${tts.provider:coqui}")
@@ -70,7 +72,7 @@ public class EnhancedTextToSpeechService extends TextToSpeechService {
                 return CompletableFuture.completedFuture(new byte[0]);
             }
             
-        } catch (Exception e) {
+        } catch (RestClientException e) {
             log.error("Coqui TTS error", e);
             return CompletableFuture.completedFuture(new byte[0]);
         }
@@ -104,9 +106,8 @@ public class EnhancedTextToSpeechService extends TextToSpeechService {
                             log.info("Successfully used Piper endpoint: {}", endpoint);
                             return response.getBody();
                         }
-                    } catch (Exception e) {
+                    } catch (RestClientException e) {
                         log.debug("Piper endpoint {} failed: {}", endpoint, e.getMessage());
-                        continue;
                     }
                 }
                 
@@ -140,7 +141,7 @@ public class EnhancedTextToSpeechService extends TextToSpeechService {
                         log.info("Successfully used custom Piper server");
                         return customResponse.getBody();
                     }
-                } catch (Exception e) {
+                } catch (RestClientException e) {
                     log.debug("Custom Piper server failed: {}", e.getMessage());
                 }
                 
