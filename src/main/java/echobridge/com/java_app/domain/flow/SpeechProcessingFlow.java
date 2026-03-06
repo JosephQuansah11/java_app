@@ -6,7 +6,7 @@ import akka.NotUsed;
 import akka.stream.javadsl.Flow;
 import echobridge.com.java_app.core.services.EnhancedSpeechRecognitionService;
 import echobridge.com.java_app.core.services.EnhancedTextToSpeechService;
-import echobridge.com.java_app.core.services.EnhancedTranslationService;
+import echobridge.com.java_app.core.services.TranslationService;
 import echobridge.com.java_app.domain.data_structure.AudioChunk;
 import echobridge.com.java_app.domain.data_structure.AudioOutput;
 import echobridge.com.java_app.domain.data_structure.Transcription;
@@ -17,7 +17,7 @@ import lombok.AllArgsConstructor;
 @AllArgsConstructor
 public class SpeechProcessingFlow {
     private final EnhancedSpeechRecognitionService asr;
-    private final EnhancedTranslationService translator;
+    private final TranslationService translator;
     private final EnhancedTextToSpeechService tts;
 
     // Flow 1: Audio → Text

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-time Translation Client</title>
+    <title>🌐 Real-time Translation Only - Akka Streams Powered</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -120,6 +120,31 @@
             width: 0%;
             transition: width 0.1s;
         }
+        
+        .websocket-status {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #fafafa;
+        }
+        
+        .websocket-log {
+            height: 150px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            background-color: #000;
+            color: #00ff00;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+        }
+        
+        .log-send { color: #ff9800; }
+        .log-receive { color: #4caf50; }
+        .log-error { color: #f44336; }
+        .log-info { color: #2196f3; }
     </style>
 </head>
 <body>
@@ -183,8 +208,13 @@
             <div id="audioLevelBar" class="audio-level-bar"></div>
         </div>
         
+        <div class="websocket-status">
+            <h3>WebSocket Status</h3>
+            <div id="websocketLog" class="websocket-log"></div>
+        </div>
+        
         <div class="transcript-container">
-            <h3>Transcript</h3>
+            <h3>🌐 Real-time Translations</h3>
             <div id="transcript"></div>
         </div>
     </div>
@@ -208,6 +238,7 @@
             initializeElements() {
                 this.statusEl = document.getElementById('status');
                 this.transcriptEl = document.getElementById('transcript');
+                this.websocketLogEl = document.getElementById('websocketLog');
                 this.connectBtn = document.getElementById('connectBtn');
                 this.startBtn = document.getElementById('startBtn');
                 this.stopBtn = document.getElementById('stopBtn');
@@ -258,9 +289,26 @@
                 }
             }
             
+            logWebSocket(message, type = 'info') {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = document.createElement('div');
+                logEntry.className = `log-${type}`;
+                logEntry.textContent = `[${timestamp}] ${message}`;
+                
+                this.websocketLogEl.appendChild(logEntry);
+                this.websocketLogEl.scrollTop = this.websocketLogEl.scrollHeight;
+                
+                // Keep only last 50 messages
+                while (this.websocketLogEl.children.length > 50) {
+                    this.websocketLogEl.removeChild(this.websocketLogEl.firstChild);
+                }
+            }
+            
             connect() {
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = `${protocol}//${window.location.host}/ws-raw`;
+                this.logWebSocket(`Connecting to: ${wsUrl}`, 'info');
+                console.log('🔗 Connecting to WebSocket:', wsUrl);
                 
                 try {
                     this.ws = new WebSocket(wsUrl);
@@ -270,7 +318,8 @@
                         this.updateStatus('Connected', 'connected');
                         this.connectBtn.textContent = 'Disconnect';
                         this.startBtn.disabled = false;
-                        console.log('WebSocket connected');
+                        this.logWebSocket('✅ Connected successfully', 'receive');
+                        console.log('✅ WebSocket connected successfully');
                     };
                     
                     this.ws.onmessage = (event) => {
@@ -284,16 +333,19 @@
                         this.connectBtn.textContent = 'Connect';
                         this.startBtn.disabled = true;
                         this.stopBtn.disabled = true;
-                        console.log('WebSocket disconnected');
+                        this.logWebSocket('❌ Disconnected', 'error');
+                        console.log('❌ WebSocket disconnected');
                     };
                     
                     this.ws.onerror = (error) => {
-                        console.error('WebSocket error:', error);
+                        this.logWebSocket(`❌ Error: ${error}`, 'error');
+                        console.error('❌ WebSocket error:', error);
                         this.updateStatus('Connection Error', 'disconnected');
                     };
                     
                 } catch (error) {
-                    console.error('Failed to connect:', error);
+                    this.logWebSocket(`❌ Failed to connect: ${error}`, 'error');
+                    console.error('❌ Failed to connect:', error);
                     this.updateStatus('Connection Failed', 'disconnected');
                 }
             }
@@ -309,17 +361,23 @@
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ 
                         audio: {
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            sampleRate: 16000
+                            echoCancellation: false,  // Disable for lower latency
+                            noiseSuppression: false,  // Disable for lower latency
+                            sampleRate: 16000,
+                            latency: 0.001  // 1ms hardware latency
                         } 
                     });
                     
-                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        latencyHint: 'interactive'  // Lowest possible latency
+                    });
+                    
+                    // Reduce buffer size for faster processing (256 samples = 16ms at 16kHz)
+                    this.bufferSize = 256;
                     this.microphone = this.audioContext.createMediaStreamSource(stream);
                     
-                    // Create audio processor for real-time processing
-                    this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+                    // Create audio processor with smaller buffer for ultra-low latency
+                    this.processor = this.audioContext.createScriptProcessor(this.bufferSize, 1, 1);
                     this.processor.onaudioprocess = (event) => {
                         const inputData = event.inputBuffer.getChannelData(0);
                         this.processAudioChunk(inputData);
@@ -327,14 +385,15 @@
                     };
                     
                     this.microphone.connect(this.processor);
-                    this.processor.connect(this.audioContext.destination);
+                    // Don't connect to destination to avoid playback delay
+                    // this.processor.connect(this.audioContext.destination);
                     
                     this.isRecording = true;
                     this.updateStatus('Recording...', 'recording');
                     this.startBtn.disabled = true;
                     this.stopBtn.disabled = false;
                     
-                    // Start transcription session
+                    // Start transcription session immediately
                     this.sendMessage({
                         type: 'start_transcription',
                         sourceLanguage: this.sourceLanguageEl.value,
@@ -405,6 +464,9 @@
             }
             
             handleMessage(message) {
+                const messageStr = JSON.stringify(message);
+                this.logWebSocket(`RECV: ${messageStr}`, 'receive');
+                console.log('🟢 Frontend RECEIVED:', message);
                 switch (message.type) {
                     case 'connection':
                         console.log('Connection message:', message);
@@ -431,43 +493,70 @@
                         break;
                         
                     case 'error':
+                        this.logWebSocket(`ERROR: ${message.message}`, 'error');
                         console.error('Server error:', message.message);
                         this.updateStatus(`Error: ${message.message}`, 'disconnected');
                         break;
                         
                     default:
+                        this.logWebSocket(`UNKNOWN: ${message.type}`, 'error');
                         console.log('Unknown message type:', message);
                 }
             }
             
             handleTranscriptionResult(message) {
-                const transcriptDiv = document.createElement('div');
+                // Log transcription details to console (behind the scenes)
+                console.log('📝 TRANSCRIPTION (behind scenes):', {
+                    partialText: message.partialText,
+                    finalText: message.finalText,
+                    confidence: message.confidence,
+                    timestamp: message.timestamp,
+                    processingMode: message.processingMode
+                });
                 
-                if (message.partialText && message.partialText !== this.lastPartialText) {
-                    transcriptDiv.className = 'partial-text';
-                    transcriptDiv.textContent = `Partial: ${message.partialText}`;
-                    this.transcriptEl.appendChild(transcriptDiv);
-                    this.lastPartialText = message.partialText;
-                }
-                
-                if (message.finalText) {
-                    transcriptDiv.className = 'final-text';
-                    transcriptDiv.textContent = `Final: ${message.finalText}`;
-                    this.transcriptEl.appendChild(transcriptDiv);
-                    
-                    // Clear partial text when we get final text
-                    this.lastPartialText = '';
-                }
-                
+                // Only show translation in the UI, hide original transcription
                 if (message.translatedText) {
                     const translatedDiv = document.createElement('div');
                     translatedDiv.className = 'translated-text';
-                    translatedDiv.textContent = `Translation: ${message.translatedText}`;
+                    translatedDiv.textContent = message.translatedText;
                     this.transcriptEl.appendChild(translatedDiv);
+                    console.log('✅ TRANSLATION DISPLAYED:', message.translatedText);
+                    
+                    // Trigger TTS for the translated text
+                    if (this.enableTTSEl.checked && message.translatedText) {
+                        this.triggerBrowserTTS(message.translatedText);
+                    }
+                } else {
+                    console.log('❌ No translatedText in message - showing original for debugging:', message);
+                    // Fallback: show original if translation fails (for debugging)
+                    if (message.finalText) {
+                        const fallbackDiv = document.createElement('div');
+                        fallbackDiv.className = 'translated-text';
+                        fallbackDiv.textContent = `[Original] ${message.finalText}`;
+                        fallbackDiv.style.color = '#ff6b6b';
+                        this.transcriptEl.appendChild(fallbackDiv);
+                    }
                 }
                 
                 // Auto-scroll to bottom
                 this.transcriptEl.scrollTop = this.transcriptEl.scrollHeight;
+            }
+            
+            triggerBrowserTTS(text) {
+                if ('speechSynthesis' in window) {
+                    // Cancel any ongoing speech
+                    window.speechSynthesis.cancel();
+                    
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.rate = 1.0;
+                    utterance.pitch = 1.0;
+                    utterance.volume = 1.0;
+                    
+                    window.speechSynthesis.speak(utterance);
+                    console.log('🔊 TTS triggered for:', text);
+                } else {
+                    console.warn('Speech synthesis not supported');
+                }
             }
             
             handleTTSRequest(message) {
@@ -513,8 +602,14 @@
             }
             
             sendMessage(message) {
+                const messageStr = JSON.stringify(message);
+                this.logWebSocket(`SEND: ${messageStr}`, 'send');
+                console.log('🔵 Frontend SENDING:', message);
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify(message));
+                    this.ws.send(messageStr);
+                } else {
+                    this.logWebSocket(`❌ WebSocket not ready, state: ${this.ws?.readyState}`, 'error');
+                    console.warn('❌ WebSocket not ready, state:', this.ws?.readyState);
                 }
             }
             

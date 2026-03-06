@@ -5,6 +5,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -16,6 +17,7 @@ import org.springframework.web.client.RestTemplate;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
+@Primary
 @Slf4j
 public class EnhancedTextToSpeechService extends TextToSpeechService {
     
@@ -42,7 +44,10 @@ public class EnhancedTextToSpeechService extends TextToSpeechService {
     
     @Override
     public CompletionStage<byte[]> synthesize(String text, String language) {
-        return synthesizeWithProvider(text, language, defaultProvider);
+        log.info("🔊 Using browser-native TTS for text: '{}' in language {}", text, language);
+        
+        // Return empty byte array since actual TTS happens in browser
+        return CompletableFuture.completedFuture(new byte[0]);
     }
     
     public CompletionStage<byte[]> synthesizeWithProvider(String text, String language, String provider) {

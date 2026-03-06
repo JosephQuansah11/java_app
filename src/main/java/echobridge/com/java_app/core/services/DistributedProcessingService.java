@@ -6,13 +6,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.List;
 import java.util.ArrayList;
-import java.util.UUID;
 
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import echobridge.com.java_app.domain.data_structure.Translation;
-import echobridge.com.java_app.domain.data_structure.Transcription;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
@@ -26,9 +23,9 @@ public class DistributedProcessingService {
     private final TextToSpeechService textToSpeechService;
     
     public DistributedProcessingService(
-            @Qualifier("enhancedTranslationService") TranslationService translationService,
-            @Qualifier("enhancedSpeechRecognitionService") SpeechRecognitionService speechRecognitionService,
-            @Qualifier("enhancedTextToSpeechService") TextToSpeechService textToSpeechService) {
+            TranslationService translationService,
+            SpeechRecognitionService speechRecognitionService,
+            TextToSpeechService textToSpeechService) {
         this.translationService = translationService;
         this.speechRecognitionService = speechRecognitionService;
         this.textToSpeechService = textToSpeechService;

@@ -5,13 +5,10 @@ import java.util.concurrent.CompletionStage;
 import java.util.Map;
 import java.util.HashMap;
 
-import org.springframework.stereotype.Service;
-
 import lombok.extern.slf4j.Slf4j;
 
-@Service
 @Slf4j
-public class FallbackTranslationService extends TranslationService {
+public class FallbackTranslationService {
     
     private final Map<String, Map<String, String>> simpleTranslations = new HashMap<>();
     
@@ -63,7 +60,6 @@ public class FallbackTranslationService extends TranslationService {
         simpleTranslations.put("en-de", enToDe);
     }
     
-    @Override
     public CompletionStage<String> translate(String text, String fromLanguage, String toLanguage) {
         return CompletableFuture.supplyAsync(() -> {
             String key = fromLanguage.toLowerCase() + "-" + toLanguage.toLowerCase();

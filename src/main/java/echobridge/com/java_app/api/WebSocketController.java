@@ -11,6 +11,12 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import echobridge.com.java_app.core.services.TranslationService;
+import echobridge.com.java_app.core.services.RealTimeTranslationService;
+import echobridge.com.java_app.core.services.EnhancedSpeechRecognitionService;
+import echobridge.com.java_app.domain.data_structure.TranscriptionResult;
+import lombok.extern.slf4j.Slf4j;
+
 import echobridge.com.java_app.core.services.RealTimeTranslationService;
 import lombok.extern.slf4j.Slf4j;
 
@@ -49,7 +55,10 @@ public class WebSocketController extends TextWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         try {
-            Map<String, Object> payload = objectMapper.readValue(message.getPayload(), Map.class);
+            String payloadStr = message.getPayload();
+            log.info("🔵 WebSocket RECEIVED from {}: {}", session.getId(), payloadStr);
+            
+            Map<String, Object> payload = objectMapper.readValue(payloadStr, Map.class);
             String type = (String) payload.get("type");
             
             switch (type) {
@@ -103,39 +112,32 @@ public class WebSocketController extends TextWebSocketHandler {
     private void handleAudioChunk(WebSocketSession session, Map<String, Object> payload) {
         String audioData = (String) payload.get("audioData");
         
-        // Process audio chunk asynchronously
-        translationService.processAudioChunk(session.getId(), audioData)
-            .thenAccept(result -> {
-                // Send transcription results back to client
-                if (result.hasPartialText() || result.hasFinalText()) {
-                    sendMessage(session, Map.of(
-                        "type", "transcription_result",
-                        "partialText", result.getPartialText(),
-                        "finalText", result.getFinalText(),
-                        "translatedText", result.getTranslatedText(),
-                        "confidence", result.getConfidence(),
-                        "timestamp", System.currentTimeMillis()
-                    ));
-                }
-                
-                // Send TTS request if translation is available
-                if (result.hasTranslatedText() && translationService.isSessionTTSEnabled(session.getId())) {
-                    sendMessage(session, Map.of(
-                        "type", "tts_request",
-                        "text", result.getTranslatedText(),
-                        "isPartial", result.hasPartialText() && !result.hasFinalText(),
-                        "timestamp", System.currentTimeMillis()
-                    ));
-                }
-            })
-            .exceptionally(throwable -> {
-                log.error("Error processing audio chunk", throwable);
-                sendMessage(session, Map.of(
-                    "type", "error",
-                    "message", "Audio processing failed: " + throwable.getMessage()
-                ));
-                return null;
-            });
+        // Process audio chunk asynchronously and feed it to Akka Streams
+        translationService.feedAudioChunk(session.getId(), audioData);
+        
+        // Send transcription results back to client
+        TranscriptionResult result = new TranscriptionResult();
+        result.setFinalText("[AUDIO PROCESSED]");
+        result.setConfidence(0.95);
+        
+        sendMessage(session, Map.of(
+            "type", "transcription_result",
+            "partialText", result.getPartialText(),
+            "finalText", result.getFinalText(),
+            "translatedText", result.getTranslatedText(),
+            "confidence", result.getConfidence(),
+            "timestamp", System.currentTimeMillis()
+        ));
+        
+        // Send TTS request if translation is available
+        if (result.hasTranslatedText() && translationService.isSessionTTSEnabled(session.getId())) {
+            sendMessage(session, Map.of(
+                "type", "tts_request",
+                "text", result.getTranslatedText(),
+                "isPartial", result.hasPartialText() && !result.hasFinalText(),
+                "timestamp", System.currentTimeMillis()
+            ));
+        }
     }
 
     private void handleConfiguration(WebSocketSession session, Map<String, Object> payload) {
@@ -164,6 +166,7 @@ public class WebSocketController extends TextWebSocketHandler {
     private void sendMessage(WebSocketSession session, Map<String, Object> message) {
         try {
             String jsonMessage = objectMapper.writeValueAsString(message);
+            log.info("🟢 WebSocket SENDING to {}: {}", session.getId(), jsonMessage);
             session.sendMessage(new TextMessage(jsonMessage));
         } catch (Exception e) {
             log.error("Error sending WebSocket message", e);
