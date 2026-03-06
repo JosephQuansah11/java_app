@@ -4,34 +4,35 @@ class RealTimeTranslationClient {
         this.mediaRecorder = null;
         this.audioContext = null;
         this.microphone = null;
-        this.processor = null;
         this.isRecording = false;
-        this.isConnected = false;
-        this.bufferSize = 256;
-        this.voices = [];
-        this.synthesis = window.speechSynthesis;
-        this.lastPartialText = '';
+        this.isConnecting = false;
         
-        this.initializeElements();
-        this.initializeEventListeners();
-        this.loadVoices();
-    }
-    
-    initializeElements() {
+        // DOM elements
         this.connectBtn = document.getElementById('connectBtn');
         this.startBtn = document.getElementById('startBtn');
         this.stopBtn = document.getElementById('stopBtn');
         this.clearBtn = document.getElementById('clearBtn');
+        this.statusEl = document.getElementById('status');
+        this.transcriptEl = document.getElementById('transcript');
+        this.audioLevelEl = document.getElementById('audioLevel');
+        this.audioLevelTextEl = document.getElementById('audioLevelText');
+        this.logContentEl = document.getElementById('logContent');
+        
+        // Settings
         this.sourceLanguageEl = document.getElementById('sourceLanguage');
         this.targetLanguageEl = document.getElementById('targetLanguage');
+        this.translationProviderEl = document.getElementById('translationProvider');
         this.ttsVoiceEl = document.getElementById('ttsVoice');
         this.ttsSpeedEl = document.getElementById('ttsSpeed');
         this.ttsSpeedValueEl = document.getElementById('ttsSpeedValue');
         this.enableTTSEl = document.getElementById('enableTTS');
-        this.statusEl = document.getElementById('status');
-        this.transcriptEl = document.getElementById('transcript');
-        this.audioLevelBar = document.getElementById('audioLevelBar');
-        this.websocketLogEl = document.getElementById('websocketLog');
+        
+        // TTS queue for sequential reading
+        this.ttsQueue = [];
+        this.isTTSSpeaking = false;
+        
+        this.initializeEventListeners();
+        this.initializeAudioLevel();
     }
     
     initializeEventListeners() {
@@ -298,7 +299,7 @@ class RealTimeTranslationClient {
             
             // Trigger TTS for the translated text
             if (this.enableTTSEl.checked && message.translatedText) {
-                this.triggerBrowserTTS(message.translatedText);
+                this.queueTTS(message.translatedText);
             }
         } else {
             console.log('❌ No translatedText in message - showing original for debugging:', message);
@@ -318,18 +319,57 @@ class RealTimeTranslationClient {
     
     triggerBrowserTTS(text) {
         if ('speechSynthesis' in window) {
-            // Cancel any ongoing speech
-            window.speechSynthesis.cancel();
+            // Don't cancel - let it finish naturally
             
             const utterance = new SpeechSynthesisUtterance(text);
-            utterance.rate = 1.0;
+            utterance.rate = parseFloat(this.ttsSpeedEl.value);
             utterance.pitch = 1.0;
             utterance.volume = 1.0;
             
+            // Set voice if specified
+            if (this.ttsVoiceEl.value !== 'default') {
+                const voices = window.speechSynthesis.getVoices();
+                const selectedVoice = voices.find(voice => 
+                    voice.name.toLowerCase().includes(this.ttsVoiceEl.value.toLowerCase())
+                );
+                if (selectedVoice) {
+                    utterance.voice = selectedVoice;
+                }
+            }
+            
+            utterance.onend = () => {
+                console.log('🔊 TTS finished for:', text);
+                this.isTTSSpeaking = false;
+                this.processTTSQueue();
+            };
+            
+            utterance.onerror = (error) => {
+                console.error('🔊 TTS error:', error);
+                this.isTTSSpeaking = false;
+                this.processTTSQueue();
+            };
+            
+            this.isTTSSpeaking = true;
             window.speechSynthesis.speak(utterance);
-            console.log('🔊 TTS triggered for:', text);
         } else {
-            console.warn('Speech synthesis not supported');
+            console.warn('🔊 Speech synthesis not supported');
+        }
+    }
+    
+    queueTTS(text) {
+        console.log('🔊 Queueing TTS for:', text);
+        this.ttsQueue.push(text);
+        
+        if (!this.isTTSSpeaking) {
+            this.processTTSQueue();
+        }
+    }
+    
+    processTTSQueue() {
+        if (this.ttsQueue.length > 0 && !this.isTTSSpeaking) {
+            const nextText = this.ttsQueue.shift();
+            console.log('🔊 Processing TTS queue item:', nextText);
+            this.triggerBrowserTTS(nextText);
         }
     }
     
