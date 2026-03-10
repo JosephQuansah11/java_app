@@ -1,140 +1,192 @@
 package echobridge.com.java_app.streams;
 
-import java.time.Duration;
-import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-
-import akka.actor.ActorSystem;
-import akka.stream.javadsl.Flow;
-import akka.stream.javadsl.Sink;
-import akka.stream.javadsl.Source;
-import akka.NotUsed;
-import akka.stream.javadsl.Keep;
-
-import echobridge.com.java_app.core.services.TranslationService;
-import echobridge.com.java_app.core.services.EnhancedSpeechRecognitionService;
-import echobridge.com.java_app.domain.data_structure.TranscriptionResult;
-import lombok.extern.slf4j.Slf4j;
+import java.util.concurrent.LinkedBlockingQueue;
 
 import org.springframework.stereotype.Component;
+
+import akka.NotUsed;
+import akka.actor.ActorSystem;
+import akka.stream.javadsl.Flow;
+import akka.stream.javadsl.Keep;
+import akka.stream.javadsl.Sink;
+import akka.stream.javadsl.Source;
+import echobridge.com.java_app.core.services.EnhancedSpeechRecognitionService;
+import echobridge.com.java_app.core.services.TranslationService;
+import echobridge.com.java_app.domain.data_structure.TranscriptionResult;
+import echobridge.com.java_app.domain.source.MicrophoneSource;
+import lombok.extern.slf4j.Slf4j;
 
 @Component
 @Slf4j
 public class AkkaStreamsOrchestrator {
 
     private final ActorSystem actorSystem;
-    private final TranslationService translationService;
     private final EnhancedSpeechRecognitionService speechRecognition;
-    
-    // Queue to hold audio chunks from WebSocket
-    private final ConcurrentHashMap<String, java.util.concurrent.BlockingQueue<String>> sessionSources = new ConcurrentHashMap<>();
+    private final TranslationService translationService;
+    private final MicrophoneSource microphoneSource;
+    private final java.util.Map<String, LinkedBlockingQueue<String>> sessionSources = new ConcurrentHashMap<>();
+    private final java.util.Map<String, java.util.concurrent.CompletionStage<?>> sessionFutures = new ConcurrentHashMap<>();
 
     public AkkaStreamsOrchestrator(ActorSystem actorSystem,
-                                         TranslationService translationService,
-                                         EnhancedSpeechRecognitionService speechRecognition) {
+            TranslationService translationService,
+            EnhancedSpeechRecognitionService speechRecognition,
+            MicrophoneSource microphoneSource) {
         this.actorSystem = actorSystem;
         this.translationService = translationService;
         this.speechRecognition = speechRecognition;
+        this.microphoneSource = microphoneSource;
     }
-    
+
     /**
-     * Creates a real-time audio processing pipeline that accepts external audio input
+     * Creates a real-time audio processing pipeline that accepts external audio
+     * input
      */
-    public void startParallelPipeline(String sessionId, String sourceLanguage, String targetLanguage, 
-                                     WebSocketMessageSender messageSender) {
+    public void startParallelPipeline(String sessionId, String sourceLanguage, String targetLanguage,
+            WebSocketMessageSender messageSender) {
         log.info("🚀 Starting REAL-TIME Akka Streams pipeline for session: {}", sessionId);
-        
-        // Create a simple source that will process when audio chunks are fed
-        Source<String, NotUsed> audioSource = Source.repeat("audio_chunk")
-            .throttle(1, java.time.Duration.ofSeconds(2));
-        
-        // Node 1: Transcription (parallel processing with higher parallelism)
-        Flow<String, TranscriptionResult, NotUsed> transcriptionNode = Flow.of(String.class)
-            .mapAsync(8, audio -> {  // Increased from 4 to 8 for faster processing
-                log.debug("🎤 Node 1: Processing real audio chunk for transcription");
-                return speechRecognition.transcribe(new short[256])
-                    .thenApply(transcription -> {
-                        TranscriptionResult result = new TranscriptionResult();
-                        result.setFinalText(transcription);
-                        result.setConfidence(0.95);
-                        log.info("🎤 Node 1 output: '{}'", transcription);
-                        return result;
-                    });
-            })
-            .filter(result -> !result.getFinalText().trim().isEmpty());
-        
-        // Node 2: Translation (parallel processing with higher parallelism)
+
+        // Create a queue-based source for real microphone audio input with capacity for
+        // smooth buffering
+        LinkedBlockingQueue<String> audioQueue = new LinkedBlockingQueue<>(
+                1000);
+        sessionSources.put(sessionId, audioQueue);
+
+        // Use MicrophoneSource directly for real audio capture
+        Source<short[], NotUsed> microphoneAudioSource = microphoneSource.createSource()
+                .map(audioChunk -> audioChunk.samples());
+
+        // Node 1: PARALLEL transcription nodes - distribute audio across multiple
+        // workers
+        Flow<short[], TranscriptionResult, NotUsed> transcriptionNode = Flow.of(short[].class)
+                .mapAsync(64, audioSamples -> { // Reduced to 64 parallel workers for lower latency
+                    // Process individual audio chunk immediately
+
+                    try {
+                        // Validate minimum audio size - reduced for better responsiveness
+                        if (audioSamples.length < 8000) { // Reduced from 16000 to 8000 samples
+                            log.debug("Audio chunk too small: {} samples (minimum 8000)", audioSamples.length);
+                            return CompletableFuture.completedFuture(null);
+                        }
+
+                        return speechRecognition.transcribe(audioSamples).thenApply(transcription -> {
+                            if (transcription != null && !transcription.trim().isEmpty()) {
+                                TranscriptionResult result = new TranscriptionResult();
+                                result.setFinalText(transcription);
+                                result.setTranslatedText("");
+                                result.setConfidence(0.95);
+                                return result;
+                            } else {
+                                return null;
+                            }
+                        }).exceptionally(throwable -> {
+                            log.error("❌ Transcription failed: {}", throwable.getMessage());
+                            return null;
+                        });
+                    } catch (Exception e) {
+                        log.error("Error processing audio chunk: {}", e.getMessage());
+                        return CompletableFuture.completedFuture(null);
+                    }
+                })
+                .filter(result -> result != null); // Remove null/empty results
+
+        // Node 2: PARALLEL translation nodes - optimized for real-time
         Flow<TranscriptionResult, TranscriptionResult, NotUsed> translationNode = Flow.of(TranscriptionResult.class)
-            .mapAsync(8, result -> {  // Increased from 4 to 8 for faster processing
-                String text = result.getFinalText();
-                log.info("🔄 Node 2: Translating '{}' from {} to {}", text, sourceLanguage, targetLanguage);
-                
-                return translationService.translate(text, sourceLanguage, targetLanguage)
-                    .thenApply(translatedText -> {
-                        result.setTranslatedText(translatedText);
-                        log.info("✅ Node 2 translation completed: '{}' -> '{}'", text, translatedText);
-                        return result;
-                    })
-                    .exceptionally(throwable -> {
-                        log.error("❌ Translation failed for text: '{}'", text, throwable);
-                        result.setTranslatedText("[ERROR] " + text);
-                        return result;
-                    });
-            })
-            .filter(result -> result.getTranslatedText() != null && !result.getTranslatedText().trim().isEmpty());
+                .mapAsync(64, result -> { // Reduced to 64 parallel translation workers
+                    String text = result.getFinalText();
+                    long startTime = System.nanoTime();
+
+                    return translationService.translate(text, sourceLanguage, targetLanguage)
+                            .thenApply(translatedText -> {
+                                long endTime = System.nanoTime();
+                                double durationMs = (endTime - startTime) / 1_000_000.0;
+                                result.setTranslatedText(translatedText);
+                                System.out.printf("🌐 TRANSLATED (%.2fms): '%s' -> '%s'%n",
+                                        durationMs, text, translatedText);
+                                return result;
+                            })
+                            .exceptionally(throwable -> {
+                                log.error("❌ Translation failed: {}", throwable.getMessage());
+                                result.setTranslatedText("[Translation failed]");
+                                return result;
+                            });
+                })
+                .filter(result -> result.getTranslatedText() != null &&
+                        !result.getTranslatedText().trim().isEmpty());
+
+        // WebSocket sink with parallel processing and 3ms interval
+        Sink<TranscriptionResult, java.util.concurrent.CompletionStage<akka.Done>> webSocketSink = Sink
+                .foreach(result -> { // Process each result immediately
+                    // your existing code
+                    System.out.println("📡 SENDING TO FRONTEND: '" + result.getFinalText() + "' -> '"
+                            + result.getTranslatedText() + "'");
+
+                    messageSender.broadcastToSession(sessionId, java.util.Map.of(
+                            "type", "transcription_result",
+                            "finalText", result.getFinalText(),
+                            "translatedText", result.getTranslatedText(),
+                            "confidence", result.getConfidence(),
+                            "processingMode", "parallel-akka-streams",
+                            "timestamp", System.currentTimeMillis()));
+                });
+
+        // Build and run real-time pipeline that uses MicrophoneSource directly
+        java.util.concurrent.CompletionStage<?> pipelineFuture = microphoneAudioSource
+                .via(transcriptionNode)
+                .via(translationNode)
+                .toMat(webSocketSink, Keep.right())
+                .run(actorSystem);
         
-        // WebSocket sink using the message sender interface
-        Sink<TranscriptionResult, CompletionStage<akka.Done>> webSocketSink = Sink.foreach(result -> {
-            log.info("🔍 DEBUG: Sending result - finalText: '{}', translatedText: '{}'", 
-                     result.getFinalText(), result.getTranslatedText());
-            
-            messageSender.broadcastToSession(sessionId, java.util.Map.of(
-                "type", "transcription_result",
-                "finalText", result.getFinalText(),
-                "translatedText", result.getTranslatedText(),
-                "confidence", result.getConfidence(),
-                "timestamp", System.currentTimeMillis(),
-                "processingMode", "realtime-akka-streams"
-            ));
-            
-            log.info("📡 REALTIME: Sent to frontend: '{}' -> '{}'", result.getFinalText(), result.getTranslatedText());
-        });
-        
-        // Build and run real-time pipeline that accepts external audio input
-        audioSource
-            .via(transcriptionNode)
-            .via(translationNode)
-            .toMat(webSocketSink, akka.stream.javadsl.Keep.right())
-            .run(actorSystem);
-        
-        log.info("✅ REALTIME Akka Streams pipeline started - Processing audio chunks!");
+        // Store the future for later cancellation
+        sessionFutures.put(sessionId, pipelineFuture);
+
+        log.debug("✅ REALTIME Akka Streams pipeline started");
     }
-    
+
     /**
-     * Feed audio chunk into the Akka Streams pipeline for a specific session
+     * Feed real microphone audio chunk into the Akka Streams pipeline for a
+     * specific session
      */
     public void feedAudioChunk(String sessionId, String audioChunk) {
-        java.util.concurrent.BlockingQueue<String> sessionSource = sessionSources.get(sessionId);
-        if (sessionSource == null) {
-            log.warn("No Akka Streams source found for session: {}", sessionId);
-            return;
+        java.util.concurrent.BlockingQueue<String> sessionQueue = sessionSources.get(sessionId);
+        if (sessionQueue != null) {
+            try {
+                sessionQueue.offer(audioChunk);
+                log.debug("🎤 Fed audio chunk to Akka Streams for session: {}", sessionId);
+            } catch (Exception e) {
+                log.error("Error feeding audio chunk to Akka Streams", e);
+            }
+        } else {
+            log.warn("No Akka Streams queue found for session: {}", sessionId);
         }
-        
-        log.debug("🎤 Feeding audio chunk into Akka Streams for session: {}", sessionId);
-        sessionSource.offer(audioChunk);
     }
-    
+
     /**
      * Stop the Akka Streams pipeline for a specific session
      */
     public void stopPipeline(String sessionId) {
         java.util.concurrent.BlockingQueue<String> sessionSource = sessionSources.remove(sessionId);
+        java.util.concurrent.CompletionStage<?> pipelineFuture = sessionFutures.remove(sessionId);
+        
         if (sessionSource != null) {
             log.info("🛑 Stopping Akka Streams pipeline for session: {}", sessionId);
             sessionSource.offer("STOP"); // Signal stop to the queue
         }
+        
+        if (pipelineFuture != null) {
+            try {
+                // Cancel the Akka Streams pipeline
+                pipelineFuture.toCompletableFuture().cancel(true);
+                log.info("🛑 Akka Streams pipeline cancelled for session: {}", sessionId);
+            } catch (Exception e) {
+                log.error("Failed to cancel Akka Streams pipeline: {}", e.getMessage());
+            }
+        }
+        
+        log.info("🛑 Akka Streams pipeline stopped for session: {}", sessionId);
     }
-    
+
     /**
      * Interface to break circular dependency
      */

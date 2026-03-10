@@ -3,6 +3,8 @@ package echobridge.com.java_app.api;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import javax.sound.sampled.LineUnavailableException;
+
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -11,13 +13,8 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import echobridge.com.java_app.core.services.TranslationService;
 import echobridge.com.java_app.core.services.RealTimeTranslationService;
-import echobridge.com.java_app.core.services.EnhancedSpeechRecognitionService;
-import echobridge.com.java_app.domain.data_structure.TranscriptionResult;
-import lombok.extern.slf4j.Slf4j;
-
-import echobridge.com.java_app.core.services.RealTimeTranslationService;
+import echobridge.com.java_app.domain.source.MicrophoneSource;
 import lombok.extern.slf4j.Slf4j;
 
 @Component
@@ -25,11 +22,15 @@ import lombok.extern.slf4j.Slf4j;
 public class WebSocketController extends TextWebSocketHandler {
 
     private final RealTimeTranslationService translationService;
+    private final MicrophoneSource microphoneSource;
     private final ObjectMapper objectMapper;
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
 
-    public WebSocketController(RealTimeTranslationService translationService, ObjectMapper objectMapper) {
+    public WebSocketController(RealTimeTranslationService translationService, 
+                              MicrophoneSource microphoneSource,
+                              ObjectMapper objectMapper) {
         this.translationService = translationService;
+        this.microphoneSource = microphoneSource;
         this.objectMapper = objectMapper;
     }
 
@@ -49,17 +50,29 @@ public class WebSocketController extends TextWebSocketHandler {
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
         sessions.remove(session.getId());
-        log.info("WebSocket connection closed: {}", session.getId());
+        log.info("🔌 WebSocket connection CLOSED: {} - Status: {} - Reason: {}", 
+            session.getId(), status, status.getReason());
+        
+        // Stop microphone if this was the last active session
+        if (sessions.isEmpty()) {
+            log.info("🛑 No more active sessions - checking microphone status");
+            // Note: We don't auto-stop microphone anymore - let user control it
+        }
     }
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         try {
             String payloadStr = message.getPayload();
-            log.info("🔵 WebSocket RECEIVED from {}: {}", session.getId(), payloadStr);
-            
             Map<String, Object> payload = objectMapper.readValue(payloadStr, Map.class);
             String type = (String) payload.get("type");
+            
+            // Don't log full audio chunk data - only log type
+            if ("audio_chunk".equals(type)) {
+                log.debug("🔵 WebSocket RECEIVED audio_chunk from {}", session.getId());
+            } else {
+                log.info("🔵 WebSocket RECEIVED {} from {}: {}", type, session.getId(), payloadStr);
+            }
             
             switch (type) {
                 case "start_transcription":
@@ -91,53 +104,61 @@ public class WebSocketController extends TextWebSocketHandler {
         String targetLanguage = (String) payload.getOrDefault("targetLanguage", "es");
         boolean enableTTS = (Boolean) payload.getOrDefault("enableTTS", true);
         
+        // Start microphone when client requests recording
+        try {
+            if (!microphoneSource.isMicrophoneActive()) {
+                microphoneSource.startMicrophone();
+                log.info("🎤 Started microphone for session: {}", session.getId());
+            }
+        } catch (LineUnavailableException e) {
+            log.error("Failed to start microphone: {}", e.getMessage());
+            sendMessage(session, Map.of(
+                "type", "error",
+                "message", "Failed to start microphone: " + e.getMessage()
+            ));
+            return;
+        }
+        
+        // Start translation session
         translationService.startSession(session.getId(), sourceLanguage, targetLanguage, enableTTS);
         
         sendMessage(session, Map.of(
             "type", "transcription_started",
             "sourceLanguage", sourceLanguage,
             "targetLanguage", targetLanguage,
-            "enableTTS", enableTTS
+            "enableTTS", enableTTS,
+            "microphoneActive", true
         ));
+        
+        log.info("🎤 Frontend started recording for session: {}", session.getId());
     }
 
     private void handleStopTranscription(WebSocketSession session, Map<String, Object> payload) {
+        // Stop microphone when client requests stop
+        if (microphoneSource.isMicrophoneActive()) {
+            microphoneSource.stopMicrophone();
+            log.info("🛑 Stopped microphone for session: {}", session.getId());
+        }
+        
+        // Stop translation session
         translationService.stopSession(session.getId());
         
         sendMessage(session, Map.of(
-            "type", "transcription_stopped"
+            "type", "transcription_stopped",
+            "microphoneActive", false
         ));
+        
+        log.info("🛑 Frontend stopped recording for session: {}", session.getId());
     }
 
     private void handleAudioChunk(WebSocketSession session, Map<String, Object> payload) {
         String audioData = (String) payload.get("audioData");
         
-        // Process audio chunk asynchronously and feed it to Akka Streams
+        // Feed real microphone audio chunk to Akka Streams for processing
+        // Results will be sent back via the Akka Streams pipeline
         translationService.feedAudioChunk(session.getId(), audioData);
         
-        // Send transcription results back to client
-        TranscriptionResult result = new TranscriptionResult();
-        result.setFinalText("[AUDIO PROCESSED]");
-        result.setConfidence(0.95);
-        
-        sendMessage(session, Map.of(
-            "type", "transcription_result",
-            "partialText", result.getPartialText(),
-            "finalText", result.getFinalText(),
-            "translatedText", result.getTranslatedText(),
-            "confidence", result.getConfidence(),
-            "timestamp", System.currentTimeMillis()
-        ));
-        
-        // Send TTS request if translation is available
-        if (result.hasTranslatedText() && translationService.isSessionTTSEnabled(session.getId())) {
-            sendMessage(session, Map.of(
-                "type", "tts_request",
-                "text", result.getTranslatedText(),
-                "isPartial", result.hasPartialText() && !result.hasFinalText(),
-                "timestamp", System.currentTimeMillis()
-            ));
-        }
+        log.debug("🎤 Fed real microphone audio chunk to Akka Streams for session: {}", session.getId());
     }
 
     private void handleConfiguration(WebSocketSession session, Map<String, Object> payload) {

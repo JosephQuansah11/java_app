@@ -5,7 +5,15 @@ import java.util.concurrent.CompletionStage;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -14,144 +22,243 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class EnhancedSpeechRecognitionService implements SpeechRecognitionService {
 
-    @Value("${vosk.model.path:src/main/resources/vosk-model-small-en-us-0.15}")
-    private String voskModelPath;
-
     @Value("${whisper.api.url:http://localhost:9000}")
     private String whisperApiUrl;
+
+    @Value("${whisper.api.key:}")
+    private String whisperApiKey;
 
     @Value("${speech.recognition.provider:whisper}")
     private String defaultProvider;
 
-    public EnhancedSpeechRecognitionService() {
-        // No RestTemplate needed for Python approach
+    private final RestTemplate restTemplate;
+
+    public EnhancedSpeechRecognitionService(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
     }
 
     @Override
     public CompletionStage<String> transcribe(short[] audioSamples) {
+        // Fast-path: directly use whisper for real-time transcription
+        return transcribeWithWhisperOptimized(audioSamples);
+    }
+
+    private CompletionStage<String> transcribeWithWhisperOptimized(short[] audioSamples) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // Since Whisper service is having connection issues, 
-                // directly use mock transcriptions for reliable essay-format content
-                log.info("🎤 Using mock transcription (Whisper service unavailable)");
-                return generateMockTranscription();
-                
+                // OPTIMIZED: Process larger chunks more efficiently
+                if (audioSamples.length < 16000) {
+                    log.warn("Audio chunk too small: {} samples (minimum 16000)", audioSamples.length);
+                    return "";
+                }
+
+                // Create WAV file in memory (no file I/O)
+                byte[] wavFile = createWavFile(audioSamples);
+
+                // Use multipart form data as required by OpenAI Whisper API
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+                // Add API key if configured
+                if (whisperApiKey != null && !whisperApiKey.isEmpty()) {
+                    headers.set("Authorization", "Bearer " + whisperApiKey);
+                }
+
+                // Create multipart body with file and parameters
+                MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+
+                body.add("file", new ByteArrayResource(wavFile) {
+                    @Override
+                    public String getFilename() {
+                        return "audio.wav";
+                    }
+                });
+                body.add("model", "whisper-1");
+                body.add("language", "en");
+                body.add("response_format", "json");
+
+                HttpEntity<MultiValueMap<String, Object>> entity = new HttpEntity<>(body, headers);
+
+                long startTime = System.nanoTime();
+
+                // Get raw response as String to debug format
+                ResponseEntity<String> rawResponse = restTemplate.postForEntity(
+                        whisperApiUrl, entity, String.class);
+                long endTime = System.nanoTime();
+
+                log.info("RAW WHISPER RESPONSE ({}ms): {}",
+                        (endTime - startTime) / 1_000_000.0, rawResponse.getBody());
+
+                if (!rawResponse.getStatusCode().is2xxSuccessful() || rawResponse.getBody() == null) {
+                    System.err.println("Whisper API failed with status: " + rawResponse.getStatusCode());
+                    return "";
+                }
+
+                String responseBody = rawResponse.getBody().trim();
+                String transcription = extractTranscription(responseBody);
+
+                double durationMs = (endTime - startTime) / 1_000_000.0;
+                System.out.printf("WHISPER (%.2fms): '%s'%n", durationMs, transcription);
+
+                return transcription;
+
             } catch (Exception e) {
-                log.error("Error in transcription process", e);
-                return generateMockTranscription();
+                System.err.println("Whisper API error: " + e.getMessage());
+                e.printStackTrace();
+                return "";
             }
         });
     }
 
-    public CompletionStage<String> transcribeWithProvider(short[] audioSamples, String provider) {
-        return CompletableFuture.supplyAsync(() -> {
-            // Since Whisper service is having connection issues, use mock for all providers
-            log.info("🎤 Using mock transcription for provider: {}", provider);
-            return generateMockTranscription();
-        });
-    }
-
-    private String generateMockTranscription() {
-        // Generate essay-format transcriptions for more realistic testing
-        String[] essayTranscriptions = {
-            "In today's rapidly evolving technological landscape, artificial intelligence has become an integral part of our daily lives.",
-            "The impact of climate change on global ecosystems cannot be overstated, as rising temperatures continue to affect biodiversity worldwide.",
-            "Educational systems around the world are adapting to new digital learning environments that offer unprecedented opportunities for students.",
-            "Economic globalization has created both opportunities and challenges for developing nations seeking sustainable growth strategies.",
-            "Healthcare innovations in recent years have dramatically improved patient outcomes through precision medicine and advanced diagnostics.",
-            "Social media platforms have fundamentally changed how we communicate and share information in modern society.",
-            "Renewable energy technologies are becoming increasingly cost-effective as solar and wind power reach grid parity in many regions.",
-            "Urban planning initiatives are focusing on creating sustainable cities that balance economic growth with environmental protection."
-        };
-        
-        // Change transcription every 3 seconds for essay-style delivery
-        int index = (int) (System.currentTimeMillis() / 3000) % essayTranscriptions.length;
-        String mockText = essayTranscriptions[index];
-        log.info("📝 Using essay transcription: '{}'", mockText);
-        return mockText;
-    }
-
-    private byte[] createWavFile(byte[] audioData) {
-        // Create proper WAV file with header for 16kHz, 16-bit, mono audio
-        int dataLength = audioData.length;
-        int headerSize = 44; // Standard WAV header is 44 bytes
-        int fileLength = headerSize + dataLength - 8; // -8 because RIFF chunk doesn't include RIFF itself
-
-        java.nio.ByteBuffer wavBuffer = java.nio.ByteBuffer.allocate(headerSize + dataLength);
-        wavBuffer.order(java.nio.ByteOrder.LITTLE_ENDIAN);
-
-        // WAV header (44 bytes total)
-        wavBuffer.put("RIFF".getBytes()); // ChunkID (4 bytes)
-        wavBuffer.putInt(fileLength); // ChunkSize (4 bytes)
-        wavBuffer.put("WAVE".getBytes()); // Format (4 bytes)
-        wavBuffer.put("fmt ".getBytes()); // Subchunk1ID (4 bytes)
-        wavBuffer.putInt(16); // Subchunk1Size (4 bytes)
-        wavBuffer.putShort((short) 1); // AudioFormat (2 bytes)
-        wavBuffer.putShort((short) 1); // NumChannels (2 bytes)
-        wavBuffer.putInt(16000); // SampleRate (4 bytes)
-        wavBuffer.putInt(32000); // ByteRate (4 bytes)
-        wavBuffer.putShort((short) 2); // BlockAlign (2 bytes)
-        wavBuffer.putShort((short) 16); // BitsPerSample (2 bytes)
-        wavBuffer.put("data".getBytes()); // Subchunk2ID (4 bytes)
-        wavBuffer.putInt(dataLength); // Subchunk2Size (4 bytes)
-
-        // Audio data
-        wavBuffer.put(audioData);
-
-        return wavBuffer.array();
-    }
-
-    private byte[] shortsToBytes(short[] shorts) {
-        java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(shorts.length * 2);
-        buffer.order(java.nio.ByteOrder.LITTLE_ENDIAN);
-        buffer.asShortBuffer().put(shorts);
-        return buffer.array();
-    }
-
-    private String extractText(String json) {
-        if (json == null || json.isEmpty())
-            return "";
-
-        int start = json.indexOf("\"text\" : \"") + 10;
-        if (start < 10)
-            start = json.indexOf("\"text\":\"") + 8;
-
-        if (start < 8)
-            return "";
-
-        int end = json.indexOf("\"", start);
-        if (end == -1)
-            return "";
-
-        return json.substring(start, end).trim();
-    }
-
-    private String extractPartialText(String json) {
-        if (json == null || json.isEmpty())
-            return "";
-
-        // Extract partial text from Vosk partial result
-        int start = json.indexOf("\"partial\" : \"") + 12;
-        if (start < 12)
-            start = json.indexOf("\"partial\":\"") + 10;
-
-        if (start < 10)
-            return "";
-
-        int end = json.indexOf("\"", start);
-        if (end == -1)
-            return "";
-
-        String partialText = json.substring(start, end).trim();
-
-        // Filter out empty partial results and common noise
-        if (partialText.isEmpty() ||
-                partialText.equals("[unk]") ||
-                partialText.equals("[spn]") ||
-                partialText.length() < 2) {
+    /**
+     * Extracts transcription from various response formats.
+     * Returns empty string if parsing fails.
+     */
+    private String extractTranscription(String responseBody) {
+        if (responseBody == null || responseBody.isEmpty()) {
             return "";
         }
 
-        return partialText;
+        try {
+            // Try OpenAI format: {"text": "..."}
+            if (responseBody.contains("\"text\"")) {
+                int textStart = responseBody.indexOf("\"text\":\"") + 8;
+                if (textStart > 7) { // Check if found
+                    int textEnd = responseBody.indexOf("\"", textStart);
+                    if (textEnd > textStart) {
+                        return responseBody.substring(textStart, textEnd)
+                                .replace("\\n", " ")
+                                .replace("\\\"", "\"")
+                                .trim();
+                    }
+                }
+            }
+
+            // Try alternative format: {"transcription": "..."}
+            if (responseBody.contains("\"transcription\"")) {
+                int textStart = responseBody.indexOf("\"transcription\":\"") + 16;
+                if (textStart > 15) {
+                    int textEnd = responseBody.indexOf("\"", textStart);
+                    if (textEnd > textStart) {
+                        return responseBody.substring(textStart, textEnd)
+                                .replace("\\n", " ")
+                                .replace("\\\"", "\"")
+                                .trim();
+                    }
+                }
+            }
+
+            // Plain text response (not JSON)
+            if (!responseBody.startsWith("{") && !responseBody.startsWith("[")) {
+                return responseBody.trim();
+            }
+
+            // Try using Jackson ObjectMapper as fallback (recommended)
+            // JsonNode root = objectMapper.readTree(responseBody);
+            // if (root.has("text")) return root.get("text").asText();
+            // if (root.has("transcription")) return root.get("transcription").asText();
+
+        } catch (Exception e) {
+            System.err.println("Failed to parse transcription: " + e.getMessage());
+        }
+
+        System.err.println("Could not parse transcription from response: " + responseBody);
+        return "";
     }
+
+    private byte[] shortsToBytesFast(short[] shorts) {
+        byte[] bytes = new byte[shorts.length * 2];
+        for (int i = 0; i < shorts.length; i++) {
+            bytes[i * 2] = (byte) (shorts[i] & 0xFF);
+            bytes[i * 2 + 1] = (byte) ((shorts[i] >> 8) & 0xFF);
+        }
+        return bytes;
+    }
+
+    private byte[] createWavFile(short[] audioSamples) {
+        // Convert short array to byte array (PCM data)
+        byte[] pcmData = shortsToBytesFast(audioSamples);
+
+        // WAV header constants
+        int sampleRate = 16000;
+        short channels = 1;
+        short bitsPerSample = 16;
+        int byteRate = sampleRate * channels * bitsPerSample / 8;
+        short blockAlign = (short) (channels * bitsPerSample / 8);
+
+        int headerSize = 44;
+        int dataSize = pcmData.length;
+        int fileSize = headerSize + dataSize;
+
+        byte[] wavFile = new byte[fileSize];
+
+        // RIFF chunk
+        wavFile[0] = 'R';
+        wavFile[1] = 'I';
+        wavFile[2] = 'F';
+        wavFile[3] = 'F';
+        wavFile[4] = (byte) (fileSize - 8);
+        wavFile[5] = (byte) ((fileSize - 8) >> 8);
+        wavFile[6] = (byte) ((fileSize - 8) >> 16);
+        wavFile[7] = (byte) ((fileSize - 8) >> 24);
+        wavFile[8] = 'W';
+        wavFile[9] = 'A';
+        wavFile[10] = 'V';
+        wavFile[11] = 'E';
+
+        // fmt chunk
+        wavFile[12] = 'f';
+        wavFile[13] = 'm';
+        wavFile[14] = 't';
+        wavFile[15] = ' ';
+        wavFile[16] = 16;
+        wavFile[17] = 0;
+        wavFile[18] = 0;
+        wavFile[19] = 0; // Subchunk1Size
+        wavFile[20] = 1;
+        wavFile[21] = 0; // AudioFormat (PCM)
+        wavFile[22] = (byte) channels;
+        wavFile[23] = 0; // NumChannels
+        wavFile[24] = (byte) sampleRate;
+        wavFile[25] = (byte) (sampleRate >> 8);
+        wavFile[26] = (byte) (sampleRate >> 16);
+        wavFile[27] = (byte) (sampleRate >> 24);
+        wavFile[28] = (byte) byteRate;
+        wavFile[29] = (byte) (byteRate >> 8);
+        wavFile[30] = (byte) (byteRate >> 16);
+        wavFile[31] = (byte) (byteRate >> 24);
+        wavFile[32] = (byte) blockAlign;
+        wavFile[33] = 0; // BlockAlign
+        wavFile[34] = (byte) bitsPerSample;
+        wavFile[35] = 0; // BitsPerSample
+
+        // data chunk
+        wavFile[36] = 'd';
+        wavFile[37] = 'a';
+        wavFile[38] = 't';
+        wavFile[39] = 'a';
+        wavFile[40] = (byte) dataSize;
+        wavFile[41] = (byte) (dataSize >> 8);
+        wavFile[42] = (byte) (dataSize >> 16);
+        wavFile[43] = (byte) (dataSize >> 24);
+
+        // Copy PCM data
+        System.arraycopy(pcmData, 0, wavFile, 44, pcmData.length);
+
+        return wavFile;
+    }
+
+    public record WhisperRequest(
+            String audio,
+            String format,
+            int sampleRate,
+            String language) {
+    }
+
+    public record WhisperResponse(
+            String text,
+            double confidence,
+            String language) {
+    }
+
 }

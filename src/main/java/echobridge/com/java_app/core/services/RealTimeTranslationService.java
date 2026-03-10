@@ -1,19 +1,14 @@
 package echobridge.com.java_app.core.services;
 
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
-import echobridge.com.java_app.domain.data_structure.TranscriptionResult;
-import echobridge.com.java_app.streams.AkkaStreamsOrchestrator;
+import echobridge.com.java_app.api.ProcessedTranscriptionWebSocketHandler;
 import echobridge.com.java_app.api.WebSocketController;
+import echobridge.com.java_app.streams.AkkaStreamsOrchestrator;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
@@ -24,22 +19,18 @@ public class RealTimeTranslationService implements AkkaStreamsOrchestrator.WebSo
     private final AkkaStreamsOrchestrator akkaStreamsOrchestrator;
     @Lazy
     private final WebSocketController webSocketController;
-    private final ExecutorService executor;
+    private final ProcessedTranscriptionWebSocketHandler processedTranscriptionHandler;
     
-    @Value("${realtime.translation.provider:google}")
-    private String defaultTranslationProvider;
-    
-    @Value("${realtime.tts.enable:true}")
-    private boolean defaultTTSEnabled;
     
     private final Map<String, TranslationSession> sessions = new ConcurrentHashMap<>();
 
     public RealTimeTranslationService(
             AkkaStreamsOrchestrator akkaStreamsOrchestrator,
-            @Lazy WebSocketController webSocketController) {
+            @Lazy WebSocketController webSocketController,
+            ProcessedTranscriptionWebSocketHandler processedTranscriptionHandler) {
         this.akkaStreamsOrchestrator = akkaStreamsOrchestrator;
         this.webSocketController = webSocketController;
-        this.executor = Executors.newCachedThreadPool();
+        this.processedTranscriptionHandler = processedTranscriptionHandler;
     }
 
     public void startSession(String sessionId, String sourceLanguage, String targetLanguage, boolean enableTTS) {
@@ -49,8 +40,6 @@ public class RealTimeTranslationService implements AkkaStreamsOrchestrator.WebSo
         session.setTargetLanguage(targetLanguage);
         session.setEnableTTS(enableTTS);
         session.setActive(true);
-        session.setLastPartialText("");
-        session.setLastFinalText("");
         
         sessions.put(sessionId, session);
         
@@ -65,35 +54,27 @@ public class RealTimeTranslationService implements AkkaStreamsOrchestrator.WebSo
         if (session != null) {
             session.setActive(false);
             sessions.remove(sessionId);
+            
+            // Stop Akka Streams pipeline
+            akkaStreamsOrchestrator.stopPipeline(sessionId);
+            
             log.info("Stopped translation session: {}", sessionId);
         }
     }
 
-    public CompletableFuture<TranscriptionResult> processAudioChunk(String sessionId, String audioData) {
-        return CompletableFuture.supplyAsync(() -> {
-            // This method is now handled by Akka Streams
-            log.debug("Audio chunk processing delegated to Akka Streams for session: {}", sessionId);
-            
-            // For now, return a mock result to maintain functionality
-            // In a real implementation, this would feed the audio to Akka Streams
-            TranscriptionResult result = new TranscriptionResult();
-            result.setFinalText("[AUDIO CHUNK PROCESSED]");
-            result.setConfidence(0.95);
-            return result;
-        });
-    }
 
     /**
      * Feed audio chunk into Akka Streams pipeline for a specific session
      */
     public void feedAudioChunk(String sessionId, String audioChunk) {
-        // Find the Akka Streams orchestrator and feed the audio chunk
-        // Note: This would typically be injected and called
-        log.info("🎤 Feeding audio chunk into Akka Streams for session: {}", sessionId);
-        
-        // For now, just log the audio chunk
-        // In a real implementation, this would call akkaStreamsOrchestrator.feedAudioChunk(sessionId, audioChunk);
-        log.debug("Audio chunk received for session {}: {}", sessionId, audioChunk);
+        TranslationSession session = sessions.get(sessionId);
+        if (session != null && session.isActive()) {
+            // Actually feed the audio chunk into Akka Streams
+            akkaStreamsOrchestrator.feedAudioChunk(sessionId, audioChunk);
+            log.debug("🎤 Fed audio chunk to Akka Streams for session: {}", sessionId);
+        } else {
+            log.warn("No active session found for audio chunk: {}", sessionId);
+        }
     }
 
     public boolean isSessionTTSEnabled(String sessionId) {
@@ -115,12 +96,38 @@ public class RealTimeTranslationService implements AkkaStreamsOrchestrator.WebSo
     @Override
     public void broadcastToSession(String sessionId, Map<String, Object> message) {
         // This will be called by AkkaStreamsOrchestrator
-        // Use the lazy-loaded WebSocketController to broadcast messages
+        // Send to both the original WebSocket controller and the new processed transcription handler
         if (webSocketController != null) {
             webSocketController.broadcastToSession(sessionId, message);
-        } else {
-            log.warn("WebSocketController is not available for session: {}", sessionId);
         }
+        
+        if (processedTranscriptionHandler != null) {
+            // Send processed transcription results to the dedicated endpoint
+            processedTranscriptionHandler.sendTranscriptionResult(sessionId, message);
+        }
+        
+        if (webSocketController == null && processedTranscriptionHandler == null) {
+            log.warn("No WebSocket handlers available for session: {}", sessionId);
+        }
+    }
+    
+    /**
+     * Broadcast message to all active sessions
+     */
+    public void broadcastToAllSessions(Map<String, Object> message) {
+        if (webSocketController != null) {
+            // Get all session IDs and broadcast to each
+            for (String sessionId : sessions.keySet()) {
+                webSocketController.broadcastToSession(sessionId, message);
+            }
+        }
+        
+        if (processedTranscriptionHandler != null) {
+            // Broadcast to all connected clients on the processed endpoint
+            processedTranscriptionHandler.broadcastTranscriptionResult(message);
+        }
+        
+        log.info("📡 Broadcasted message to {} active sessions", sessions.size());
     }
 
     @Data
@@ -130,8 +137,6 @@ public class RealTimeTranslationService implements AkkaStreamsOrchestrator.WebSo
         private String targetLanguage;
         private boolean enableTTS;
         private boolean active;
-        private String lastPartialText;
-        private String lastFinalText;
         private String ttsVoice;
         private Double ttsSpeed;
         private String translationProvider;

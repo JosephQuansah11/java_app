@@ -32,10 +32,12 @@ public class MicrophoneSource {
     public static final int CHANNELS = 1;
     public static final boolean SIGNED = true;
     public static final boolean BIG_ENDIAN = false;
-
-    // 1-second chunks for processing
-    public static final int CHUNK_DURATION_MS = 2000;
-    public static final int CHUNK_SIZE = (int) (SAMPLE_RATE * CHUNK_DURATION_MS / 1000);
+    
+    // OPTIMIZED: Larger chunks for better Whisper performance
+    public static final int CHUNK_SIZE = 64000;  // 4 seconds of audio (was 32000 = 2 seconds)
+    
+    //4-second chunks for processing
+    public static final int CHUNK_DURATION_MS = 4000;  // 4 seconds (was 2000 = 2 seconds)
 
     private final TargetDataLine microphone;
     private final AudioFormat format;
@@ -47,7 +49,7 @@ public class MicrophoneSource {
         this.format = new AudioFormat(SAMPLE_RATE, SAMPLE_SIZE_BITS, CHANNELS, SIGNED, BIG_ENDIAN);
         DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
         this.microphone = (TargetDataLine) AudioSystem.getLine(info);
-        this.microphone.open(format);
+        // Don't open microphone in constructor - wait for explicit start
         this.audioCaptureState = new AudioCaptureState(microphone, format, CHUNK_SIZE);
     }
 
@@ -58,6 +60,25 @@ public class MicrophoneSource {
                 state -> captureNextChunk(state))
                 .map(samples -> new AudioChunk(samples, (int) SAMPLE_RATE))
                 .mapMaterializedValue(ignored -> NotUsed.getInstance());
+    }
+    
+    public void startMicrophone() throws LineUnavailableException {
+        if (!audioCaptureState.isOpen()) {
+            log.info("🎤 Starting microphone on demand...");
+            audioCaptureState.open();
+            audioCaptureState.start();
+        }
+    }
+    
+    public void stopMicrophone() {
+        if (audioCaptureState.isOpen()) {
+            log.info("🛑 Stopping microphone on demand...");
+            audioCaptureState.close();
+        }
+    }
+    
+    public boolean isMicrophoneActive() {
+        return audioCaptureState.isOpen();
     }
 
 

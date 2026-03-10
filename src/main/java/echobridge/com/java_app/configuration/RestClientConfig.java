@@ -1,19 +1,12 @@
-// package echobridge.com.java_app.configuration;
+package echobridge.com.java_app.configuration;
 
-// import org.springframework.context.annotation.Bean;
-// import org.springframework.context.annotation.Configuration;
-// import org.springframework.web.client.RestClient;
+// RestTemplate bean is already defined in JacksonConfig.java
+// This class can be used for additional REST client configurations if needed
 
 // @Configuration
 // public class RestClientConfig {
-
 //     @Bean
-//     RestClient.Builder restClientBuilder() {
-//         return RestClient.builder();
-//     }
-    
-//     @Bean
-//     RestClient restClient(RestClient.Builder builder) {
-//         return builder.build();
+//     public RestTemplate restTemplate() {
+//         return new RestTemplate();
 //     }
 // }
