@@ -8,6 +8,10 @@ class RealTimeTranslationClient {
         this.isRecording = false;
         this.isConnecting = false;
         
+        // Initialize TTS
+        this.synthesis = window.speechSynthesis;
+        this.voices = [];
+        
         // DOM elements
         this.connectBtn = document.getElementById('connectBtn');
         this.startBtn = document.getElementById('startBtn');
@@ -46,8 +50,13 @@ class RealTimeTranslationClient {
         this.messageQueue = [];
         this.isProcessingMessages = false;
         
+        // Deduplication tracking
+        this.lastProcessedText = null;
+        this.lastProcessedTranslation = null;
+        
         this.initializeEventListeners();
         this.initializeAudioLevel();
+        this.initializeTTS();
     }
     
     initializeAudioLevel() {
@@ -55,6 +64,19 @@ class RealTimeTranslationClient {
         this.audioLevelBar = document.getElementById('audioLevelBar');
         if (!this.audioLevelBar) {
             console.warn('Audio level bar element not found');
+        }
+    }
+    
+    initializeTTS() {
+        console.log('🔊 Initializing TTS...');
+        
+        // Load voices when they're ready
+        if (this.synthesis) {
+            this.synthesis.addEventListener('voiceschanged', () => this.loadVoices());
+            // Load voices immediately if they're already available
+            this.loadVoices();
+        } else {
+            console.warn('🔊 Speech synthesis not supported in this browser');
         }
     }
     
@@ -77,11 +99,6 @@ class RealTimeTranslationClient {
             this.ttsSpeedEl.addEventListener('input', (e) => {
                 this.ttsSpeedValueEl.textContent = parseFloat(e.target.value).toFixed(1);
             });
-        }
-        
-        // Load voices when they're ready
-        if (this.synthesis) {
-            this.synthesis.addEventListener('voiceschanged', () => this.loadVoices());
         }
     }
     
@@ -185,6 +202,20 @@ class RealTimeTranslationClient {
                         // Get actual transcription data from data field or direct fields
                         let transcriptionData = message.data || message;
                         console.log('🎯 Using transcription data:', transcriptionData);
+                        
+                        // Deduplication check - skip if same as last processed
+                        const currentText = transcriptionData.finalText || '';
+                        const currentTranslation = transcriptionData.translatedText || '';
+                        
+                        if (this.lastProcessedText === currentText && 
+                            this.lastProcessedTranslation === currentTranslation) {
+                            console.log('🔄 Skipping duplicate transcription/translation');
+                            return;
+                        }
+                        
+                        // Update last processed values
+                        this.lastProcessedText = currentText;
+                        this.lastProcessedTranslation = currentTranslation;
                         
                         // Create result container with clean styling
                         const resultContainer = document.createElement('div');

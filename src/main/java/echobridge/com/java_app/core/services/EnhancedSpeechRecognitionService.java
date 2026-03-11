@@ -1,5 +1,6 @@
 package echobridge.com.java_app.core.services;
 
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -24,9 +25,15 @@ public class EnhancedSpeechRecognitionService implements SpeechRecognitionServic
 
     @Value("${whisper.api.url:http://localhost:9000}")
     private String whisperApiUrl;
-
+    
     @Value("${whisper.api.key:}")
     private String whisperApiKey;
+    
+    @Value("${ghananlp.asr.url:https://translation-api.ghananlp.org/asr/v1/transcribe?language=ak}")
+    private String ghananlpAsrUrl;
+    
+    @Value("${ghananlp.api.key:}")
+    private String ghananlpApiKey;
 
     @Value("${speech.recognition.provider:whisper}")
     private String defaultProvider;
@@ -40,7 +47,49 @@ public class EnhancedSpeechRecognitionService implements SpeechRecognitionServic
     @Override
     public CompletionStage<String> transcribe(short[] audioSamples) {
         // Fast-path: directly use whisper for real-time transcription
-        return transcribeWithWhisperOptimized(audioSamples);
+        // TODO: Add language detection to route Twi/Akan to Ghana NLP ASR
+        return transcribeWithGhanaNLP(audioSamples, "ak");
+    }
+    
+    private CompletionStage<String> transcribeWithGhanaNLP(short[] audioSamples, String language) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                // Create multipart form data for audio file
+                byte[] wavFile = createWavFile(audioSamples);
+                
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+                headers.set("Ocp-Apim-Subscription-Key", ghananlpApiKey);
+                
+                // Create multipart request
+                MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+                body.add("audio", new ByteArrayResource(wavFile) {
+                    @Override
+                    public String getFilename() {
+                        return "audio.wav";
+                    }
+                });
+                body.add("language", language);
+                
+                HttpEntity<MultiValueMap<String, Object>> entity = new HttpEntity<>(body, headers);
+                
+                ResponseEntity<Map> response = restTemplate.postForEntity(ghananlpAsrUrl, entity, Map.class);
+                
+                if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                    String transcription = (String) response.getBody().get("transcription");
+                    if (transcription != null && !transcription.trim().isEmpty()) {
+                        log.info("Ghana NLP ASR successful: {}", transcription);
+                        return transcription;
+                    }
+                }
+                
+            } catch (Exception e) {
+                log.warn("Ghana NLP ASR failed: {}", e.getMessage());
+            }
+            
+            // Fallback to Whisper
+            return transcribeWithWhisperOptimized(audioSamples).toCompletableFuture().join();
+        });
     }
 
     private CompletionStage<String> transcribeWithWhisperOptimized(short[] audioSamples) {

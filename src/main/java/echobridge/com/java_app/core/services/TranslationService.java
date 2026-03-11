@@ -31,30 +31,35 @@ public class TranslationService {
     
     @Value("${argos.translate.url:http://localhost:5001}")
     private String argosTranslateUrl;
+    
+    // FIX: Remove trailing space from default URL
+    @Value("${ghananlp.api.url:https://translation-api.ghananlp.org}")
+    private String ghananlpApiUrl;
+    
+    @Value("${ghananlp.api.key:}")
+    private String ghananlpApiKey;
 
     public TranslationService(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
     }
 
     public CompletionStage<String> translate(String text, String sourceLanguage, String targetLanguage) {
-        // Fast path: skip logging overhead for common cases
         if (text == null || text.trim().isEmpty()) {
             return CompletableFuture.completedFuture(text);
         }
         
-        // Handle auto-detection
         if ("auto".equals(sourceLanguage)) {
             sourceLanguage = detectLanguageFast(text);
+        }else if (shouldUseGhanaNLP(sourceLanguage, targetLanguage)) {
+            return translateWithGhanaNLP(text, sourceLanguage, targetLanguage);
         }
         
-        // Direct fast translation with immediate response
         return translateFast(text, sourceLanguage, targetLanguage);
     }
-    
+
     private CompletionStage<String> translateFast(String text, String sourceLanguage, String targetLanguage) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // Quick API call attempt
                 String url = libreTranslateUrl + "/translate";
                 
                 Map<String, Object> request = new HashMap<>();
@@ -72,7 +77,6 @@ public class TranslationService {
                 if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                     String translatedText = (String) response.getBody().get("translatedText");
                     if (translatedText != null && !translatedText.trim().isEmpty()) {
-                        // Log translation to terminal for user visibility
                         System.out.println("🌐 TRANSLATED: '" + text + "' -> '" + translatedText + "'");
                         return translatedText;
                     }
@@ -81,125 +85,110 @@ public class TranslationService {
                 log.debug("Translation API unavailable: {}", e.getMessage());
             }
             
-            // Immediate fallback with language tag
             String fallbackText = "[" + targetLanguage.toUpperCase() + "] " + text;
             System.out.println("🌐 TRANSLATED (fallback): '" + text + "' -> '" + fallbackText + "'");
             return fallbackText;
         });
     }
-    
-    private CompletionStage<String> translateWithLibre(String text, String sourceLanguage, String targetLanguage) {
+
+    private CompletionStage<String> translateWithGhanaNLP(String text, String sourceLanguage, String targetLanguage) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                String url = libreTranslateUrl + "/translate";
+                // FIX: Use /v1/translate endpoint (not /translate)
+                String url = ghananlpApiUrl.trim() + "/v1/translate";  // Also trim the URL
+                
+                String languagePair = sourceLanguage + "-" + targetLanguage;
                 
                 Map<String, Object> request = new HashMap<>();
-                request.put("q", text);
-                request.put("source", mapLanguageCode(sourceLanguage, "libre"));
-                request.put("target", mapLanguageCode(targetLanguage, "libre"));
-                request.put("format", "text");
+                request.put("in", text);
+                request.put("lang", languagePair);
                 
                 HttpHeaders headers = new HttpHeaders();
                 headers.setContentType(MediaType.APPLICATION_JSON);
+                headers.set("Ocp-Apim-Subscription-Key", ghananlpApiKey);
                 
                 HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
                 
-                ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
+                // FIX: GhanaNLP returns plain string, not JSON object
+                ResponseEntity<String> response = restTemplate.postForEntity(url, entity, String.class);
                 
                 if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                    String translatedText = (String) response.getBody().get("translatedText");
-                    if (translatedText != null && !translatedText.trim().isEmpty()) {
-                        log.info("LibreTranslate successful: {}", translatedText);
+                    String translatedText = response.getBody();
+                    // Handle potential JSON string wrapping (if API returns quoted string)
+                    if (translatedText.startsWith("\"") && translatedText.endsWith("\"")) {
+                        translatedText = translatedText.substring(1, translatedText.length() - 1);
+                    }
+                    
+                    if (!translatedText.trim().isEmpty()) {
+                        log.info("Ghana NLP translation successful: '{}' -> '{}'", text, translatedText);
                         return translatedText;
                     }
                 }
                 
             } catch (Exception e) {
-                log.warn("LibreTranslate failed: {}", e.getMessage());
+                log.warn("Ghana NLP translation failed for '{}': {}", text, e.getMessage());
             }
             
-            // Fallback to simple mock translation
-            return "[" + targetLanguage.toUpperCase() + "] " + text;
-        });
-    }
-    
-    private CompletionStage<String> translateWithArgos(String text, String sourceLanguage, String targetLanguage) {
-        return CompletableFuture.supplyAsync(() -> {
+            // FIX: Wrap fallback in try-catch to prevent unhandled exceptions
             try {
-                String url = argosTranslateUrl + "/translate";
-                
-                Map<String, Object> request = new HashMap<>();
-                request.put("text", text);
-                request.put("from", mapLanguageCode(sourceLanguage, "argos"));
-                request.put("to", mapLanguageCode(targetLanguage, "argos"));
-                
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.APPLICATION_JSON);
-                
-                HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
-                
-                ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
-                
-                if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                    String translatedText = (String) response.getBody().get("translatedText");
-                    log.info("ArgosTranslate successful: {}", translatedText);
-                    return translatedText;
-                }
-                
-            } catch (Exception e) {
-                log.warn("ArgosTranslate failed: {}", e.getMessage());
+                return translateFast(text, sourceLanguage, targetLanguage).toCompletableFuture().get();
+            } catch (Exception fallbackEx) {
+                log.error("Both Ghana NLP and LibreTranslate failed for '{}': {}", text, fallbackEx.getMessage());
+                return "[" + targetLanguage.toUpperCase() + "] " + text;
             }
-            
-            // Fallback to mock translation
-            return translateWithMock(text, sourceLanguage, targetLanguage).toCompletableFuture().join();
         });
     }
-    
-    private CompletionStage<String> translateWithMock(String text, String sourceLanguage, String targetLanguage) {
-        return CompletableFuture.supplyAsync(() -> {
-            log.info("Using mock translation from {} to {}", sourceLanguage, targetLanguage);
-            
-            // Simple mock translations for demonstration
-            Map<String, Map<String, String>> mockTranslations = new HashMap<>();
-            
-            // English to other languages
-            Map<String, String> enTranslations = new HashMap<>();
-            enTranslations.put("es", "El tiempo es agradable hoy");
-            enTranslations.put("fr", "Le temps est agréable aujourd'hui");
-            enTranslations.put("de", "Das Wetter ist heute schön");
-            enTranslations.put("zh", "今天天气很好");
-            enTranslations.put("ja", "今日は天気が良いです");
-            mockTranslations.put("en", enTranslations);
-            
-            // Spanish to other languages
-            Map<String, String> esTranslations = new HashMap<>();
-            esTranslations.put("en", "The weather is nice today");
-            esTranslations.put("fr", "Le temps est agréable aujourd'hui");
-            esTranslations.put("de", "Das Wetter ist heute schön");
-            mockTranslations.put("es", esTranslations);
-            
-            // French to other languages
-            Map<String, String> frTranslations = new HashMap<>();
-            frTranslations.put("en", "The weather is nice today");
-            frTranslations.put("es", "El tiempo es agradable hoy");
-            frTranslations.put("de", "Das Wetter ist heute schön");
-            mockTranslations.put("fr", frTranslations);
-            
-            Map<String, String> sourceTranslations = mockTranslations.get(sourceLanguage);
-            if (sourceTranslations != null) {
-                String translated = sourceTranslations.get(targetLanguage);
-                if (translated != null) {
-                    return translated;
-                }
-            }
-            
-            // Default fallback
-            return text;
-        });
+
+    private boolean shouldUseGhanaNLP(String sourceLanguage, String targetLanguage) {
+        // GhanaNLP supports: Twi (tw), Ga (gaa), Dagbani (dag), Ewe (ee), Yoruba (yo), etc.
+        return ("tw".equals(sourceLanguage) || "tw".equals(targetLanguage)) ||
+               ("ak".equals(sourceLanguage) || "ak".equals(targetLanguage)) ||
+               ("gaa".equals(sourceLanguage) || "gaa".equals(targetLanguage)) ||
+               ("ee".equals(sourceLanguage) || "ee".equals(targetLanguage)) ||
+               ("dag".equals(sourceLanguage) || "dag".equals(targetLanguage)) ||
+               ("yo".equals(sourceLanguage) || "yo".equals(targetLanguage));
     }
-    
+
+    private String mapLanguageCode(String language, String provider) {
+        // ... same as before ...
+        Map<String, String> languageMap = new HashMap<>();
+        
+        if ("libre".equals(provider)) {
+            languageMap.put("en", "en");
+            languageMap.put("es", "es");
+            languageMap.put("fr", "fr");
+            languageMap.put("de", "de");
+            languageMap.put("zh", "zh");
+            languageMap.put("ja", "ja");
+            languageMap.put("tw", "tw");
+            languageMap.put("ak", "ak");
+            languageMap.put("gaa", "gaa");
+            languageMap.put("ee", "ee");
+            languageMap.put("dag", "dag");
+            languageMap.put("yo", "yo");
+            languageMap.put("auto", "auto");
+        } else if ("argos".equals(provider)) {
+            languageMap.put("en", "en");
+            languageMap.put("es", "es");
+            languageMap.put("fr", "fr");
+            languageMap.put("de", "de");
+            languageMap.put("zh", "zh");
+            languageMap.put("ja", "ja");
+        } else if ("ghananlp".equals(provider)) {
+            languageMap.put("en", "en");
+            languageMap.put("tw", "tw");
+            languageMap.put("ak", "ak");
+            languageMap.put("gaa", "gaa");
+            languageMap.put("ee", "ee");
+            languageMap.put("dag", "dag");
+            languageMap.put("yo", "yo");
+            languageMap.put("auto", "auto");
+        }
+        
+        return languageMap.getOrDefault(language, language);
+    }
+
     private String detectLanguageFast(String text) {
-        // Fast language detection based on common words
         String lowerText = text.toLowerCase();
         if (lowerText.contains(" the ") || lowerText.contains(" and ") || lowerText.contains(" is ")) {
             return "en";
@@ -210,31 +199,6 @@ public class TranslationService {
         } else if (lowerText.contains(" der ") || lowerText.contains(" die ") || lowerText.contains(" und ")) {
             return "de";
         }
-        return "en"; // Default to English
-    }
-    
-    private String mapLanguageCode(String language, String provider) {
-        Map<String, String> languageMap = new HashMap<>();
-        
-        if ("libre".equals(provider)) {
-            // LibreTranslate language codes
-            languageMap.put("en", "en");
-            languageMap.put("es", "es");
-            languageMap.put("fr", "fr");
-            languageMap.put("de", "de");
-            languageMap.put("zh", "zh");
-            languageMap.put("ja", "ja");
-            languageMap.put("auto", "auto");
-        } else if ("argos".equals(provider)) {
-            // Argos Translate language codes
-            languageMap.put("en", "en");
-            languageMap.put("es", "es");
-            languageMap.put("fr", "fr");
-            languageMap.put("de", "de");
-            languageMap.put("zh", "zh");
-            languageMap.put("ja", "ja");
-        }
-        
-        return languageMap.getOrDefault(language, language);
+        return "en";
     }
 }

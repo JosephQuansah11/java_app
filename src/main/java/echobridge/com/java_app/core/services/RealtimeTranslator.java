@@ -9,8 +9,6 @@ import akka.stream.KillSwitches;
 import akka.stream.Materializer;
 import akka.stream.UniqueKillSwitch;
 import akka.stream.javadsl.Keep;
-import akka.stream.javadsl.Sink;
-import echobridge.com.java_app.domain.data_structure.Transcription;
 import echobridge.com.java_app.domain.flow.SpeechProcessingFlow;
 import echobridge.com.java_app.domain.sink.SpeakerSink;
 import echobridge.com.java_app.domain.source.MicrophoneSource;

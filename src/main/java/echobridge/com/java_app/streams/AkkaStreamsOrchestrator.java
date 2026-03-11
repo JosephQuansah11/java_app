@@ -1,11 +1,14 @@
 package echobridge.com.java_app.streams;
 
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import org.springframework.stereotype.Component;
 
+import akka.Done;
 import akka.NotUsed;
 import akka.actor.ActorSystem;
 import akka.stream.javadsl.Flow;
@@ -26,8 +29,8 @@ public class AkkaStreamsOrchestrator {
     private final EnhancedSpeechRecognitionService speechRecognition;
     private final TranslationService translationService;
     private final MicrophoneSource microphoneSource;
-    private final java.util.Map<String, LinkedBlockingQueue<String>> sessionSources = new ConcurrentHashMap<>();
-    private final java.util.Map<String, java.util.concurrent.CompletionStage<?>> sessionFutures = new ConcurrentHashMap<>();
+    private final Map<String, LinkedBlockingQueue<String>> sessionSources = new ConcurrentHashMap<>();
+    private final Map<String, CompletionStage<?>> sessionFutures = new ConcurrentHashMap<>();
 
     public AkkaStreamsOrchestrator(ActorSystem actorSystem,
             TranslationService translationService,
@@ -95,15 +98,10 @@ public class AkkaStreamsOrchestrator {
         Flow<TranscriptionResult, TranscriptionResult, NotUsed> translationNode = Flow.of(TranscriptionResult.class)
                 .mapAsync(64, result -> { // Reduced to 64 parallel translation workers
                     String text = result.getFinalText();
-                    long startTime = System.nanoTime();
 
                     return translationService.translate(text, sourceLanguage, targetLanguage)
                             .thenApply(translatedText -> {
-                                long endTime = System.nanoTime();
-                                double durationMs = (endTime - startTime) / 1_000_000.0;
                                 result.setTranslatedText(translatedText);
-                                System.out.printf("🌐 TRANSLATED (%.2fms): '%s' -> '%s'%n",
-                                        durationMs, text, translatedText);
                                 return result;
                             })
                             .exceptionally(throwable -> {
@@ -116,13 +114,9 @@ public class AkkaStreamsOrchestrator {
                         !result.getTranslatedText().trim().isEmpty());
 
         // WebSocket sink with parallel processing and 3ms interval
-        Sink<TranscriptionResult, java.util.concurrent.CompletionStage<akka.Done>> webSocketSink = Sink
+        Sink<TranscriptionResult, CompletionStage<Done>> webSocketSink = Sink
                 .foreach(result -> { // Process each result immediately
-                    // your existing code
-                    System.out.println("📡 SENDING TO FRONTEND: '" + result.getFinalText() + "' -> '"
-                            + result.getTranslatedText() + "'");
-
-                    messageSender.broadcastToSession(sessionId, java.util.Map.of(
+                    messageSender.broadcastToSession(sessionId, Map.of(
                             "type", "transcription_result",
                             "finalText", result.getFinalText(),
                             "translatedText", result.getTranslatedText(),
@@ -132,7 +126,7 @@ public class AkkaStreamsOrchestrator {
                 });
 
         // Build and run real-time pipeline that uses MicrophoneSource directly
-        java.util.concurrent.CompletionStage<?> pipelineFuture = microphoneAudioSource
+       CompletionStage<?> pipelineFuture = microphoneAudioSource
                 .via(transcriptionNode)
                 .via(translationNode)
                 .toMat(webSocketSink, Keep.right())
@@ -191,6 +185,6 @@ public class AkkaStreamsOrchestrator {
      * Interface to break circular dependency
      */
     public interface WebSocketMessageSender {
-        void broadcastToSession(String sessionId, java.util.Map<String, Object> message);
+        void broadcastToSession(String sessionId, Map<String, Object> message);
     }
 }

@@ -1,18 +1,13 @@
 package echobridge.com.java_app.streams;
 
-import java.util.concurrent.CompletionStage;
-
-import akka.Done;
+import java.time.Duration;
 import akka.actor.ActorSystem;
 import akka.stream.javadsl.Flow;
-import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
 import akka.stream.javadsl.BroadcastHub;
 import akka.stream.javadsl.Keep;
-import akka.stream.OverflowStrategy;
 import akka.NotUsed;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import echobridge.com.java_app.core.services.EnhancedSpeechRecognitionService;
 import echobridge.com.java_app.domain.data_structure.TranscriptionResult;
@@ -26,14 +21,11 @@ public class TranscriptionStream {
     
     private final ActorSystem actorSystem;
     private final EnhancedSpeechRecognitionService speechRecognition;
-    private final ObjectMapper objectMapper;
     
     public TranscriptionStream(ActorSystem actorSystem, 
-                             EnhancedSpeechRecognitionService speechRecognition,
-                             ObjectMapper objectMapper) {
+                             EnhancedSpeechRecognitionService speechRecognition) {
         this.actorSystem = actorSystem;
         this.speechRecognition = speechRecognition;
-        this.objectMapper = objectMapper;
     }
     
     /**
@@ -51,7 +43,7 @@ public class TranscriptionStream {
                     .thenApply(transcription -> {
                         TranscriptionResult result = new TranscriptionResult();
                         result.setFinalText(transcription);
-                        result.setConfidence(0.95);
+                        result.setConfidence(0.98);
                         log.info("🎤 Transcribed: '{}'", transcription);
                         return result;
                     });
@@ -64,7 +56,7 @@ public class TranscriptionStream {
      */
     public Source<TranscriptionResult, NotUsed> createTranscriptionSource() {
         return Source.repeat("audio-chunk")  // Simulate audio input
-            .throttle(1, java.time.Duration.ofSeconds(2))  // Every 2 seconds
+            .throttle(1, Duration.ofSeconds(1))  // Every 1 second
             .via(createTranscriptionFlow())
             .toMat(BroadcastHub.of(TranscriptionResult.class, 256), Keep.right())
             .run(actorSystem);
